@@ -5,6 +5,7 @@ export interface StoreForMap {
   storeId?: number | string;
   storeName?: string;
   name?: string;
+  mainDrinkDtos?: { type: string; price?: number }[];
   locationDto?: { latitude: number; longitude: number; address?: string };
   latitude?: number;
   longitude?: number;
@@ -18,6 +19,7 @@ interface KakaoMapProps {
   lat: number;
   lng: number;
   stores?: StoreForMap[];
+  selectedDrinkType?: string;
   myLocation?: { lat: number; lng: number } | null;
   labelStore?: { name: string; lat: number; lng: number } | null;
   focusLocation?: { lat: number; lng: number; key?: number } | null;
@@ -26,13 +28,21 @@ interface KakaoMapProps {
   onMapMoved?: (lat: number, lng: number) => void;
 }
 
-const MARKER_HTML = (count: number) => {
+const DRINK_THEME: Record<string, { color: string; icon: string }> = {
+  SOJU: { color: "#2BC26B", icon: "https://static.toss.im/2d-emojis/png/4x/uE100.png" },
+  BEER: { color: "#F5A623", icon: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png" },
+};
+
+const MARKER_HTML = (count: number, color: string, icon: string, priceLabel: string) => {
   const badge =
     count > 1
-      ? `<div style="position:absolute;top:-4px;right:-4px;background:#3182f6;color:#fff;font-size:10px;font-weight:700;border-radius:100px;min-width:16px;height:16px;display:flex;align-items:center;justify-content:center;padding:0 4px;">${count}</div>`
+      ? `<div style="position:absolute;top:-4px;right:-4px;background:#3182f6;color:#fff;font-size:9px;font-weight:700;border-radius:100px;min-width:14px;height:14px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${count}</div>`
       : "";
-  return `<div style="position:relative;width:40px;height:40px;cursor:pointer;">
-    <div style="width:40px;height:40px;background-color:#3182F6;-webkit-mask-image:url(https://static.toss.im/icons/svg/icon-pin-location-mono.svg);mask-image:url(https://static.toss.im/icons/svg/icon-pin-location-mono.svg);-webkit-mask-size:contain;mask-size:contain;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;"></div>
+  return `<div style="position:relative;cursor:pointer;transform:translateY(-2px);">
+    <div style="display:flex;align-items:center;gap:6px;height:34px;padding:0 10px;background:#fff;border:2px solid ${color};border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,0.16);white-space:nowrap;">
+      <img src="${icon}" alt="" style="width:18px;height:18px;flex-shrink:0;" />
+      <span style="font-size:14px;line-height:1;font-weight:700;color:#0f172a;letter-spacing:-0.2px;">${priceLabel}</span>
+    </div>
     ${badge}
   </div>`;
 };
@@ -60,6 +70,7 @@ export default function KakaoMap({
   lat,
   lng,
   stores = [],
+  selectedDrinkType = "SOJU",
   myLocation,
   labelStore = null,
   focusLocation = null,
@@ -171,9 +182,14 @@ export default function KakaoMap({
       const slng = group[0].locationDto?.longitude ?? group[0].longitude!;
       const position = new kakao.maps.LatLng(slat, slng);
       const count = group.length;
+      const theme = DRINK_THEME[selectedDrinkType] ?? DRINK_THEME.SOJU;
+      const drink =
+        group[0].mainDrinkDtos?.find((d) => d.type === selectedDrinkType) ??
+        group[0].mainDrinkDtos?.[0];
+      const priceLabel = drink?.price != null ? `${drink.price.toLocaleString()}원` : "-";
 
       const container = document.createElement("div");
-      container.innerHTML = MARKER_HTML(count);
+      container.innerHTML = MARKER_HTML(count, theme.color, theme.icon, priceLabel);
       container.addEventListener("click", () => {
         if (currentOverlayRef.current) {
           currentOverlayRef.current.setMap(null);
@@ -277,7 +293,7 @@ export default function KakaoMap({
     if (!mapInstance.current || !window.kakao?.maps) return;
     renderMarkers(window.kakao, mapInstance.current, stores);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stores]);
+  }, [stores, selectedDrinkType]);
 
   // 내 위치 변경 시 지도 이동 + 파란 점 마커
   useEffect(() => {

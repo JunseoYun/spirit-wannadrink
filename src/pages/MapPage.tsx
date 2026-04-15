@@ -15,6 +15,7 @@ import { adaptive } from "@toss/tds-colors";
 import KakaoMap from "../components/KakaoMap";
 import { getStoreMarkers, getStoreList, getStorePreview } from "../api/store";
 import type { StoreItem } from "../api/store";
+import { getAddressFromCoords } from "../api/location";
 
 declare global {
   interface Window {
@@ -51,8 +52,10 @@ function getStoreName(store: StoreItem) {
   return store.name || store.storeName || "";
 }
 
-function getMainPriceText(store: StoreItem) {
-  const drink = store.mainDrinkDtos?.[0];
+function getMainPriceText(store: StoreItem, drinkType?: string) {
+  const drink = drinkType
+    ? store.mainDrinkDtos?.find((d) => d.type === drinkType) ?? store.mainDrinkDtos?.[0]
+    : store.mainDrinkDtos?.[0];
   if (!drink) return "";
   const label = DRINK_LABELS[drink.type] || drink.type;
   const price = drink.price != null ? ` ${drink.price.toLocaleString()}원` : "";
@@ -129,7 +132,10 @@ export default function MapPage() {
   const [showSearchHere, setShowSearchHere] = useState(false);
   const [labelStore, setLabelStore] = useState<{ name: string; lat: number; lng: number } | null>(null);
   const [focusLocation, setFocusLocation] = useState<{ lat: number; lng: number; key: number } | null>(null);
+  const [maxPrice, setMaxPrice] = useState<number | null>(4000);
+  const [showPricePicker, setShowPricePicker] = useState(false);
   const programmaticPanRef = useRef(false);
+  const focusFirstOnNextFetchRef = useRef(false);
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleListScroll = useCallback(() => {
@@ -161,21 +167,61 @@ export default function MapPage() {
   const dragging = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const DRINK_TYPES = ["SOJU", "BEER"];
+
   const fetchStores = useCallback(async (lat: number, lng: number) => {
     setLoadingStores(true);
     setShowSearchHere(false);
+    const drinkType = DRINK_TYPES[selectedChip];
     try {
       const [markers, list] = await Promise.all([
-        getStoreMarkers(lat, lng),
-        getStoreList(lat, lng),
+        getStoreMarkers(lat, lng, 2, drinkType),
+        getStoreList(lat, lng, 2, 0, drinkType),
       ]);
-      setMarkerStores(markers);
-      setListStores(list);
+      const matchesMaxPrice = (store: StoreItem) => {
+        if (maxPrice == null) return true;
+        const drink = store.mainDrinkDtos?.find((d) => d.type === drinkType);
+        return drink?.price != null && drink.price <= maxPrice;
+      };
+      const getStoreKey = (store: StoreItem) => String(store.storeId ?? store.id ?? "");
+      const filteredList = list.filter(matchesMaxPrice);
+      const allowedKeys = new Set(filteredList.map(getStoreKey).filter((k) => k !== ""));
+      const filteredMarkers =
+        maxPrice == null ? markers : markers.filter((m) => allowedKeys.has(getStoreKey(m)));
+      const listMapByKey = new Map(filteredList.map((s) => [getStoreKey(s), s]));
+      const mergedMarkers = filteredMarkers.map((marker) => {
+        const listStore = listMapByKey.get(getStoreKey(marker));
+        return listStore ? { ...marker, mainDrinkDtos: listStore.mainDrinkDtos } : marker;
+      });
+
+      setListStores(filteredList);
+      setMarkerStores(mergedMarkers);
+      if (focusFirstOnNextFetchRef.current) {
+        focusFirstOnNextFetchRef.current = false;
+        const firstStore = filteredList[0];
+        const lat = firstStore?.locationDto?.latitude;
+        const lng = firstStore?.locationDto?.longitude;
+        if (lat != null && lng != null) {
+          programmaticPanRef.current = true;
+          setFocusLocation({ lat, lng, key: Date.now() });
+          setLabelStore(null);
+        }
+      }
     } catch (e) {
       console.error("매장 조회 실패", e);
     } finally {
       setLoadingStores(false);
     }
+  }, [selectedChip, maxPrice]);
+
+  // 칩(drinkType) 또는 maxPrice 변경 시 현재 위치로 재조회
+  useEffect(() => {
+    fetchStores(mapCenter.lat, mapCenter.lng);
+  }, [selectedChip, maxPrice]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updatePriceFromCoords = useCallback(async (lat: number, lng: number) => {
+    const address = await getAddressFromCoords(lat, lng);
+    setMaxPrice(address?.includes("서울") ? 5000 : 4000);
   }, []);
 
   // 최초 마운트: GPS 시도 후 fetchStores
@@ -185,13 +231,14 @@ export default function MapPage() {
         const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setMyLocation(loc);
         setMapCenter(loc);
+        updatePriceFromCoords(loc.lat, loc.lng);
         fetchStores(loc.lat, loc.lng);
       },
       () => {
         fetchStores(DEFAULT_LAT, DEFAULT_LNG);
       },
     );
-  }, [fetchStores]);
+  }, [fetchStores, updatePriceFromCoords]);
 
   // 지도 이동 시 검색 버튼만 표시 + 목록 숨김 (programmatic pan은 제외)
   const handleMapMoved = useCallback((lat: number, lng: number) => {
@@ -259,7 +306,7 @@ export default function MapPage() {
   };
 
   const translateY = !showList
-    ? "calc(100% + 8px + min(env(safe-area-inset-bottom), 34px))"
+    ? "100%"
     : `${dragY}px`;
   const transition = dragging.current
     ? "none"
@@ -271,6 +318,7 @@ export default function MapPage() {
         lat={mapCenter.lat}
         lng={mapCenter.lng}
         stores={markerStores}
+        selectedDrinkType={DRINK_TYPES[selectedChip]}
         myLocation={myLocation}
         labelStore={labelStore}
         focusLocation={focusLocation}
@@ -284,19 +332,25 @@ export default function MapPage() {
         </Tooltip>
       </div>
 
-      {showSearchHere && (
-        <div
-          style={{
-            position: "absolute",
-            top: 16,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 200,
-          }}
-        >
+      <div
+        style={{
+          position: "absolute",
+          top: 16,
+          left: 16,
+          right: 16,
+          height: 36,
+          zIndex: 200,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          pointerEvents: "none",
+        }}
+      >
+        {showSearchHere && (
           <button
             onClick={() => {
               setShowSearchHere(false);
+              updatePriceFromCoords(mapCenter.lat, mapCenter.lng);
               fetchStores(mapCenter.lat, mapCenter.lng);
             }}
             style={{
@@ -311,12 +365,46 @@ export default function MapPage() {
               cursor: "pointer",
               boxShadow: "0 2px 8px rgba(49,130,246,0.4)",
               whiteSpace: "nowrap",
+              pointerEvents: "auto",
             }}
           >
             이 지역에서 검색
           </button>
-        </div>
-      )}
+        )}
+        <button
+          onClick={() => setShowPricePicker(true)}
+          style={{
+            position: "absolute",
+            right: 0,
+            height: 36,
+            padding: "0 14px",
+            borderRadius: 100,
+            border: maxPrice != null ? "none" : `1.5px solid rgba(0,19,43,0.12)`,
+            background: maxPrice != null ? "rgba(49,130,246,0.12)" : "rgba(255,255,255,0.92)",
+            color: maxPrice != null ? "#3182f6" : adaptive.grey600,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
+            boxShadow: "0 1px 4px rgba(0,19,43,0.12)",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            whiteSpace: "nowrap",
+            pointerEvents: "auto",
+          }}
+        >
+          {maxPrice != null ? `~${maxPrice.toLocaleString()}원` : "가격"}
+          {maxPrice != null ? (
+            <span style={{ fontSize: 14, lineHeight: 1 }}>×</span>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M6 2.5v7M2.5 6h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          )}
+        </button>
+      </div>
 
       {!showList && (
         <div onClick={() => setShowList(true)}>
@@ -333,9 +421,9 @@ export default function MapPage() {
       <div
         style={{
           position: "absolute",
-          bottom: "calc(8px + min(env(safe-area-inset-bottom), 34px))",
-          left: 8,
-          right: 8,
+          bottom: 0,
+          left: 0,
+          right: 0,
           transform: `translateY(${translateY})`,
           transition,
           zIndex: 100,
@@ -355,6 +443,7 @@ export default function MapPage() {
                 (pos) => {
                   const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
                   setMyLocation(loc);
+                  updatePriceFromCoords(loc.lat, loc.lng);
                   fetchStores(loc.lat, loc.lng);
                 },
                 () => openToast("위치 권한을 허용해주세요.", { gap: 30 }),
@@ -390,7 +479,10 @@ export default function MapPage() {
             {CHIP_ITEMS.map((label, i) => (
               <button
                 key={label}
-                onClick={() => setSelectedChip(i)}
+                onClick={() => {
+                  if (selectedChip !== i) focusFirstOnNextFetchRef.current = true;
+                  setSelectedChip(i);
+                }}
                 style={{
                   height: 36,
                   padding: "0 14px",
@@ -415,9 +507,9 @@ export default function MapPage() {
         <div
           style={{
             background: "var(--adaptiveBackground, #fff)",
-            borderRadius: 20,
-            boxShadow:
-              "0 2px 16px rgba(0,19,43,0.12), 0 0 0 1px rgba(0,19,43,0.04)",
+            borderRadius: "20px 20px 0 0",
+            overflow: "hidden",
+            boxShadow: "0 2px 16px rgba(0,19,43,0.12)",
           }}
         >
           <div
@@ -462,7 +554,7 @@ export default function MapPage() {
               listStores.map((store, index) => {
                 const storeId = store.storeId ?? store.id ?? "";
                 const name = getStoreName(store);
-                const price = getMainPriceText(store);
+                const price = getMainPriceText(store, DRINK_TYPES[selectedChip]);
                 const category = getCategoryText(store);
                 const { status, color, variant } = getStoreStatus(store);
                 return (
@@ -547,7 +639,7 @@ export default function MapPage() {
           />
         }
       >
-        {selectedStore?.mainDrinkDtos?.filter((d) => d.type === "SOJU" || d.type === "BEER").map((drink) => (
+        {["SOJU", "BEER"].flatMap((type) => selectedStore?.mainDrinkDtos?.filter((d) => d.type === type) ?? []).map((drink) => (
           <ListRow
             key={drink.type}
             left={
@@ -571,6 +663,41 @@ export default function MapPage() {
             verticalPadding="large"
           />
         ))}
+      </BottomSheet>
+
+      <BottomSheet
+        open={showPricePicker}
+        onClose={() => setShowPricePicker(false)}
+        header={
+          <BottomSheet.Header>
+            {CHIP_ITEMS[selectedChip]} 최대 가격 설정
+          </BottomSheet.Header>
+        }
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "8px 16px 24px" }}>
+          {[3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000].map((price) => (
+            <button
+              key={price}
+              onClick={() => {
+                setMaxPrice((prev) => (prev === price ? null : price));
+                setShowPricePicker(false);
+              }}
+              style={{
+                height: 40,
+                padding: "0 16px",
+                borderRadius: 100,
+                border: maxPrice === price ? "none" : `1.5px solid ${adaptive.grey200}`,
+                background: maxPrice === price ? "#3182f6" : "#fff",
+                color: maxPrice === price ? "#fff" : adaptive.grey700,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ~{price.toLocaleString()}원
+            </button>
+          ))}
+        </div>
       </BottomSheet>
     </div>
   );

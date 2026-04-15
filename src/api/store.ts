@@ -39,24 +39,26 @@ export interface StoreItem {
   phoneNumber?: string
 }
 
-export async function getStoreMarkers(lat: number, lng: number, radius = 2): Promise<StoreItem[]> {
+export async function getStoreMarkers(lat: number, lng: number, radius = 2, drinkType?: string): Promise<StoreItem[]> {
   const params = new URLSearchParams({
     latitude: String(lat),
     longitude: String(lng),
     radius: String(radius),
   })
+  if (drinkType) params.set('drinkType', drinkType)
   const res = await authFetch(`${BASE_URL}/api/store/get-by/condition-search/markers?${params}`)
   const data = await res.json()
   return data.data ?? []
 }
 
-export async function getStoreList(lat: number, lng: number, radius = 2, page = 0): Promise<StoreItem[]> {
+export async function getStoreList(lat: number, lng: number, radius = 2, page = 0, drinkType?: string): Promise<StoreItem[]> {
   const params = new URLSearchParams({
     latitude: String(lat),
     longitude: String(lng),
     radius: String(radius),
     page: String(page),
   })
+  if (drinkType) params.set('drinkType', drinkType)
   const res = await authFetch(`${BASE_URL}/api/store/get-by/condition-search?${params}`)
   const data = await res.json()
   return data.data?.content ?? []
