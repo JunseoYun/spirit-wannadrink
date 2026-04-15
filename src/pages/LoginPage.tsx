@@ -1,26 +1,65 @@
-import { useNavigate } from 'react-router-dom'
-import { Asset, AgreementV3, BottomSheet, TextButton, Top } from '@toss/tds-mobile'
-import { adaptive } from '@toss/tds-colors'
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { appLogin } from "@apps-in-toss/web-framework";
+import {
+  Asset,
+  AgreementV3,
+  BottomSheet,
+  TextButton,
+  Top,
+} from "@toss/tds-mobile";
+import { adaptive } from "@toss/tds-colors";
+import { tossLogin } from "../api/auth";
+import { authStore } from "../store/auth";
 
 const AGREEMENTS = [
-  { id: '0', label: '[한잔할까] 동의항목', arrowType: 'none' as const },
-  { id: '1', label: '동의항목은 콘솔에서 수정할 수 있어요', arrowType: 'link' as const },
-  { id: '2', label: '이 화면은 확인용으로만 사용해주세요', arrowType: 'link' as const },
-  { id: '3', label: '', arrowType: 'link' as const },
-  { id: '4', label: '토스 동의항목', arrowType: 'link' as const },
-  { id: '5', label: '[필수] 개인정보 제3자 정보 제공', arrowType: 'link' as const },
-  { id: '6', label: '[선택] 선택 제공 항목', arrowType: 'link' as const },
-]
+  { id: "0", label: "[한잔할까] 동의항목", arrowType: "none" as const },
+  {
+    id: "1",
+    label: "동의항목은 콘솔에서 수정할 수 있어요",
+    arrowType: "link" as const,
+  },
+  {
+    id: "2",
+    label: "이 화면은 확인용으로만 사용해주세요",
+    arrowType: "link" as const,
+  },
+  { id: "3", label: "", arrowType: "link" as const },
+  { id: "4", label: "토스 동의항목", arrowType: "link" as const },
+  {
+    id: "5",
+    label: "[필수] 개인정보 제3자 정보 제공",
+    arrowType: "link" as const,
+  },
+  { id: "6", label: "[선택] 선택 제공 항목", arrowType: "link" as const },
+];
 
 export default function LoginPage() {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    setLoading(true);
+    try {
+      const { authorizationCode, referrer } = await appLogin();
+      alert(`authorizationCode: ${authorizationCode}\nreferrer: ${referrer}`)
+      const tokens = await tossLogin(authorizationCode, referrer);
+      authStore.setTokens(tokens.accessToken, tokens.refreshToken);
+      alert(`accessToken: ${tokens.accessToken}\n\nrefreshToken: ${tokens.refreshToken}`)
+      navigate("/map");
+    } catch (e: any) {
+      alert(`로그인 실패: ${JSON.stringify(e)}`)
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <Top
         title={
           <Top.TitleParagraph size={28} color={adaptive.grey900}>
-            [한잔할까]에서 토스로{'\n'}로그인할까요?
+            [한잔할까]에서 토스로{"\n"}로그인할까요?
           </Top.TitleParagraph>
         }
         upper={
@@ -38,12 +77,14 @@ export default function LoginPage() {
 
       <BottomSheet
         header={
-          <BottomSheet.Header>[한잔할까] 로그인을 위해 꼭 필요한 동의만 추렸어요</BottomSheet.Header>
+          <BottomSheet.Header>
+            [한잔할까] 로그인을 위해 꼭 필요한 동의만 추렸어요
+          </BottomSheet.Header>
         }
         open={true}
         onClose={() => {}}
         cta={
-          <div onClick={() => navigate('/map')}>
+          <div onClick={handleLogin}>
             <BottomSheet.CTA
               bottomAccessory={
                 <TextButton size="xsmall" variant="underline">
@@ -52,7 +93,8 @@ export default function LoginPage() {
               }
               color="primary"
               variant="fill"
-              disabled={false}
+              disabled={loading}
+              loading={loading}
             >
               동의하고 시작하기
             </BottomSheet.CTA>
@@ -70,5 +112,5 @@ export default function LoginPage() {
         ))}
       </BottomSheet>
     </div>
-  )
+  );
 }

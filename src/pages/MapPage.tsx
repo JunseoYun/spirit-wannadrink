@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Badge,
   BottomSheet,
@@ -6,12 +6,15 @@ import {
   FixedBottomCTA,
   ListRow,
   Paragraph,
+  Skeleton,
   Spacing,
   Tooltip,
   useToast,
 } from "@toss/tds-mobile";
 import { adaptive } from "@toss/tds-colors";
 import KakaoMap from "../components/KakaoMap";
+import { getStoreMarkers, getStoreList, getStorePreview } from "../api/store";
+import type { StoreItem } from "../api/store";
 
 declare global {
   interface Window {
@@ -19,193 +22,217 @@ declare global {
   }
 }
 
-const STORES = [
-  {
-    id: "1",
-    name: "한잔할까 신논현점",
-    price: "소주 5,000원",
-    category: "한식 구이·찜",
-    status: "영업 중",
-    address: "서울특별시 강남구 논현동 1길 1",
-    closingTime: "22:30",
-    distance: "353m",
-    drinks: [
-      {
-        name: "소주",
-        price: "5,000원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/uE100.png",
-      },
-      {
-        name: "맥주",
-        price: "5,000원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png",
-      },
-    ],
-    badgeColor: "blue" as const,
-    badgeVariant: "fill" as const,
-    latitude: 37.5044,
-    longitude: 127.0225,
-  },
-  {
-    id: "2",
-    name: "한잔할까 선정릉점",
-    price: "소주 5,000원",
-    category: "이자카야",
-    status: "곧 영업 마감",
-    address: "서울특별시 강남구 선릉로 2길 5",
-    closingTime: "23:00",
-    distance: "1.2km",
-    drinks: [
-      {
-        name: "소주",
-        price: "5,000원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/uE100.png",
-      },
-      {
-        name: "맥주",
-        price: "6,000원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png",
-      },
-    ],
-    badgeColor: "blue" as const,
-    badgeVariant: "weak" as const,
-    latitude: 37.5087,
-    longitude: 127.0472,
-  },
-  {
-    id: "3",
-    name: "한잔할까 역삼점",
-    price: "소주 6,000원",
-    category: "한식 포차",
-    status: "영업 종료",
-    address: "서울특별시 강남구 역삼동 3길 8",
-    closingTime: "21:00",
-    distance: "800m",
-    drinks: [
-      {
-        name: "소주",
-        price: "6,000원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/uE100.png",
-      },
-      {
-        name: "맥주",
-        price: "6,000원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png",
-      },
-    ],
-    badgeColor: "elephant" as const,
-    badgeVariant: "weak" as const,
-    latitude: 37.4996,
-    longitude: 127.0367,
-  },
-  {
-    id: "4",
-    name: "을지로 포차골목",
-    price: "소주 4,500원",
-    category: "한식 포차",
-    status: "영업 중",
-    address: "서울특별시 중구 을지로 4길 12",
-    closingTime: "01:00",
-    distance: "2.1km",
-    drinks: [
-      {
-        name: "소주",
-        price: "4,500원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/uE100.png",
-      },
-      {
-        name: "맥주",
-        price: "5,000원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png",
-      },
-    ],
-    badgeColor: "blue" as const,
-    badgeVariant: "fill" as const,
-    latitude: 37.5665,
-    longitude: 126.9974,
-  },
-  {
-    id: "5",
-    name: "홍대 이자카야 사케",
-    price: "소주 5,500원",
-    category: "이자카야",
-    status: "곧 영업 마감",
-    address: "서울특별시 마포구 와우산로 5",
-    closingTime: "23:30",
-    distance: "3.4km",
-    drinks: [
-      {
-        name: "소주",
-        price: "5,500원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/uE100.png",
-      },
-      {
-        name: "맥주",
-        price: "6,500원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png",
-      },
-    ],
-    badgeColor: "blue" as const,
-    badgeVariant: "weak" as const,
-    latitude: 37.5574,
-    longitude: 126.9245,
-  },
-  {
-    id: "6",
-    name: "강남 고기집 쏘맥",
-    price: "소주 6,000원",
-    category: "한식 구이·찜",
-    status: "영업 중",
-    address: "서울특별시 강남구 강남대로 6길 3",
-    closingTime: "00:00",
-    distance: "500m",
-    drinks: [
-      {
-        name: "소주",
-        price: "6,000원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/uE100.png",
-      },
-      {
-        name: "맥주",
-        price: "7,000원",
-        emoji: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png",
-      },
-    ],
-    badgeColor: "blue" as const,
-    badgeVariant: "fill" as const,
-    latitude: 37.4979,
-    longitude: 127.0276,
-  },
-];
-
 const CHIP_ITEMS = ["소주", "맥주"];
+
+const DRINK_LABELS: Record<string, string> = {
+  SOJU: "소주", BEER: "맥주", MAKGEOLLI: "막걸리", WINE: "와인",
+  COCKTAIL: "칵테일", SAKE: "사케", KAOLIANG: "고량주", WHISKEY: "위스키",
+  VODKA: "보드카", TRADITIONAL: "전통주", HIGHBALL: "하이볼", TEQUILA: "데킬라",
+};
+
+const DRINK_EMOJIS: Record<string, string> = {
+  SOJU: "https://static.toss.im/2d-emojis/png/4x/uE100.png",
+  BEER: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png",
+  WINE: "https://static.toss.im/2d-emojis/png/4x/u1F377.png",
+  COCKTAIL: "https://static.toss.im/2d-emojis/png/4x/u1F378.png",
+  MAKGEOLLI: "https://static.toss.im/2d-emojis/png/4x/u1F376.png",
+  SAKE: "https://static.toss.im/2d-emojis/png/4x/u1F376.png",
+  WHISKEY: "https://static.toss.im/2d-emojis/png/4x/u1F943.png",
+  HIGHBALL: "https://static.toss.im/2d-emojis/png/4x/u1F943.png",
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  IZAKAYA: "이자카야", KOREAN: "한식", WESTERN: "양식", CHINESE: "중식",
+  POCHA: "포장마차", GAMSEONG: "감성주점", GRILLED_STEW: "구이·찜",
+  CHICKEN_HOF: "치킨·호프", RAW_SEAFOOD: "회·해산물", PUB_BAR: "펍·바",
+};
+
+function getStoreName(store: StoreItem) {
+  return store.name || store.storeName || "";
+}
+
+function getMainPriceText(store: StoreItem) {
+  const drink = store.mainDrinkDtos?.[0];
+  if (!drink) return "";
+  const label = DRINK_LABELS[drink.type] || drink.type;
+  const price = drink.price != null ? ` ${drink.price.toLocaleString()}원` : "";
+  return label + price;
+}
+
+function getCategoryText(store: StoreItem) {
+  const cat = store.categories?.[0];
+  return cat ? (CATEGORY_LABELS[cat] || cat) : "";
+}
+
+function getStoreStatus(store: StoreItem): { status: string; color: "blue" | "elephant"; variant: "fill" | "weak" } {
+  if (store.isAlwaysOpen) return { status: "24시간 영업", color: "blue", variant: "fill" };
+
+  const days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+  const today = days[new Date().getDay()];
+  const info = store.operationInfoDtos?.find((d) => d.dayOfWeek === today);
+
+  if (!info || info.isClosed) return { status: "영업 종료", color: "elephant", variant: "weak" };
+
+  const toSec = (t?: string) => {
+    if (!t) return null;
+    const p = t.split(":");
+    return parseInt(p[0]) * 3600 + parseInt(p[1]) * 60;
+  };
+  const now = new Date();
+  const cur = now.getHours() * 3600 + now.getMinutes() * 60;
+  const open = toSec(info.openTime);
+  const close = toSec(info.closeTime);
+
+  if (open != null && close != null && (cur < open || cur > close)) {
+    return { status: "영업 종료", color: "elephant", variant: "weak" };
+  }
+  if (close != null && close - cur <= 1800 && close - cur > 0) {
+    return { status: "곧 영업 마감", color: "blue", variant: "weak" };
+  }
+  return { status: "영업 중", color: "blue", variant: "fill" };
+}
+
+function getClosingTime(store: StoreItem) {
+  if (store.isAlwaysOpen) return "24시간";
+  const days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+  const today = days[new Date().getDay()];
+  const info = store.operationInfoDtos?.find((d) => d.dayOfWeek === today);
+  if (!info?.closeTime) return "";
+  const parts = info.closeTime.split(":");
+  return `${parts[0]}:${parts[1]}`;
+}
+
+function calcDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  const d = 2 * R * Math.asin(Math.sqrt(a));
+  return d < 1000 ? `${Math.round(d)}m` : `${(d / 1000).toFixed(1)}km`;
+}
+
+const DEFAULT_LAT = 37.5044;
+const DEFAULT_LNG = 127.027;
 
 export default function MapPage() {
   const [showList, setShowList] = useState(true);
   const [dragY, setDragY] = useState(0);
   const [selectedChip, setSelectedChip] = useState(0);
-  const [myLocation, setMyLocation] = useState<{
-    lat: number;
-    lng: number;
-  } | null>(null);
-  const [selectedStore, setSelectedStore] = useState<(typeof STORES)[0] | null>(
-    null,
-  );
+  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [mapCenter, setMapCenter] = useState({ lat: DEFAULT_LAT, lng: DEFAULT_LNG });
+  const [markerStores, setMarkerStores] = useState<StoreItem[]>([]);
+  const [listStores, setListStores] = useState<StoreItem[]>([]);
+  const [selectedStore, setSelectedStore] = useState<StoreItem | null>(null);
+  const [loadingStores, setLoadingStores] = useState(true);
+  const [showSearchHere, setShowSearchHere] = useState(false);
+  const [labelStore, setLabelStore] = useState<{ name: string; lat: number; lng: number } | null>(null);
+  const [focusLocation, setFocusLocation] = useState<{ lat: number; lng: number; key: number } | null>(null);
+  const programmaticPanRef = useRef(false);
+  const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleListScroll = useCallback(() => {
+    if (scrollThrottleRef.current) return;
+    scrollThrottleRef.current = setTimeout(() => {
+      scrollThrottleRef.current = null;
+      const container = scrollRef.current;
+      if (!container || !listStores.length) return;
+      const containerTop = container.getBoundingClientRect().top;
+      const items = container.querySelectorAll("[data-store-index]");
+      for (const item of items) {
+        const rect = item.getBoundingClientRect();
+        if (rect.bottom > containerTop) {
+          const idx = parseInt(item.getAttribute("data-store-index") ?? "0");
+          const store = listStores[idx];
+          const lat = store?.locationDto?.latitude;
+          const lng = store?.locationDto?.longitude;
+          if (lat != null && lng != null) {
+            programmaticPanRef.current = true;
+            setFocusLocation({ lat, lng, key: Date.now() });
+          }
+          break;
+        }
+      }
+    }, 150);
+  }, [listStores]);
   const { openToast } = useToast();
   const touchStartY = useRef(0);
   const dragging = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // 인디케이터 drag — 항상 시트 이동
+  const fetchStores = useCallback(async (lat: number, lng: number) => {
+    setLoadingStores(true);
+    setShowSearchHere(false);
+    try {
+      const [markers, list] = await Promise.all([
+        getStoreMarkers(lat, lng),
+        getStoreList(lat, lng),
+      ]);
+      setMarkerStores(markers);
+      setListStores(list);
+    } catch (e) {
+      console.error("매장 조회 실패", e);
+    } finally {
+      setLoadingStores(false);
+    }
+  }, []);
+
+  // 최초 마운트: GPS 시도 후 fetchStores
+  useEffect(() => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setMyLocation(loc);
+        setMapCenter(loc);
+        fetchStores(loc.lat, loc.lng);
+      },
+      () => {
+        fetchStores(DEFAULT_LAT, DEFAULT_LNG);
+      },
+    );
+  }, [fetchStores]);
+
+  // 지도 이동 시 검색 버튼만 표시 + 목록 숨김 (programmatic pan은 제외)
+  const handleMapMoved = useCallback((lat: number, lng: number) => {
+    if (programmaticPanRef.current) {
+      programmaticPanRef.current = false;
+      return;
+    }
+    setMapCenter({ lat, lng });
+    setShowSearchHere(true);
+    setShowList(false);
+  }, []);
+
+  // 마커 클릭 시 listStores에서 찾고, 없으면 preview 조회 + 이름 라벨 표시
+  const handleMarkerClick = useCallback(
+    async (storeId: number | string) => {
+      const found = listStores.find(
+        (s) => String(s.storeId ?? s.id) === String(storeId),
+      );
+      const store = found ?? await (async () => {
+        try { return await getStorePreview(storeId); } catch (e) { console.error("매장 상세 조회 실패", e); return null; }
+      })();
+      if (!store) return;
+      setSelectedStore(store);
+      const lat = store.locationDto?.latitude;
+      const lng = store.locationDto?.longitude;
+      if (lat != null && lng != null) {
+        setLabelStore({ name: getStoreName(store), lat, lng });
+      }
+    },
+    [listStores],
+  );
+
+  // 인디케이터 drag
   const onHandleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
     dragging.current = true;
   };
 
-  // 리스트 drag — scrollTop이 0이고 아래로 당길 때만 시트 이동
   const onListTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
-    dragging.current = false; // 일단 false, move에서 판단
+    dragging.current = false;
   };
 
   const onListTouchMove = (e: React.TouchEvent) => {
@@ -213,7 +240,7 @@ export default function MapPage() {
     const atTop = (scrollRef.current?.scrollTop ?? 0) === 0;
     if (atTop && dy > 0) {
       dragging.current = true;
-      e.preventDefault(); // 위로 스크롤 막기
+      e.preventDefault();
     }
     if (!dragging.current) return;
     setDragY(Math.max(0, dy));
@@ -241,10 +268,14 @@ export default function MapPage() {
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <KakaoMap
-        lat={37.5044}
-        lng={127.027}
-        stores={STORES}
+        lat={mapCenter.lat}
+        lng={mapCenter.lng}
+        stores={markerStores}
         myLocation={myLocation}
+        labelStore={labelStore}
+        focusLocation={focusLocation}
+        onMarkerClick={handleMarkerClick}
+        onMapMoved={handleMapMoved}
       />
 
       <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", zIndex: 10, pointerEvents: "none" }}>
@@ -252,6 +283,40 @@ export default function MapPage() {
           <Spacing size={26} />
         </Tooltip>
       </div>
+
+      {showSearchHere && (
+        <div
+          style={{
+            position: "absolute",
+            top: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 200,
+          }}
+        >
+          <button
+            onClick={() => {
+              setShowSearchHere(false);
+              fetchStores(mapCenter.lat, mapCenter.lng);
+            }}
+            style={{
+              height: 36,
+              padding: "0 16px",
+              borderRadius: 100,
+              border: "none",
+              background: "#3182f6",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(49,130,246,0.4)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            이 지역에서 검색
+          </button>
+        </div>
+      )}
 
       {!showList && (
         <div onClick={() => setShowList(true)}>
@@ -265,7 +330,6 @@ export default function MapPage() {
         </div>
       )}
 
-      {/* 칩 + 패널 wrapper — 같이 translateY */}
       <div
         style={{
           position: "absolute",
@@ -288,11 +352,11 @@ export default function MapPage() {
           <button
             onClick={() =>
               navigator.geolocation.getCurrentPosition(
-                (pos) =>
-                  setMyLocation({
-                    lat: pos.coords.latitude,
-                    lng: pos.coords.longitude,
-                  }),
+                (pos) => {
+                  const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                  setMyLocation(loc);
+                  fetchStores(loc.lat, loc.lng);
+                },
                 () => openToast("위치 권한을 허용해주세요.", { gap: 30 }),
               )
             }
@@ -378,6 +442,7 @@ export default function MapPage() {
           </div>
           <div
             ref={scrollRef}
+            onScroll={handleListScroll}
             onTouchStart={onListTouchStart}
             onTouchMove={onListTouchMove}
             onTouchEnd={onTouchEnd}
@@ -387,44 +452,65 @@ export default function MapPage() {
               overscrollBehavior: "none",
             }}
           >
-            {STORES.map((store) => (
-              <ListRow
-                key={store.id}
-                onClick={() => setSelectedStore(store)}
-                left={
-                  <ListRow.AssetIcon
-                    size="medium"
-                    name="icon-store-mono"
-                    backgroundColor={adaptive.greyOpacity100}
-                  />
-                }
-                contents={
-                  <ListRow.Texts
-                    type="3RowTypeA"
-                    top={store.name}
-                    topProps={{ color: adaptive.grey800, fontWeight: "bold" }}
-                    middle={
-                      <Paragraph.Text>
-                        <b style={{ color: adaptive.blue500 }}>{store.price}</b>
-                      </Paragraph.Text>
+            {loadingStores ? (
+              <Skeleton pattern="subtitleListWithIcon" />
+            ) : listStores.length === 0 ? (
+              <div style={{ padding: "24px 16px", textAlign: "center", color: adaptive.grey500, fontSize: 14 }}>
+                주변에 매장이 없어요
+              </div>
+            ) : (
+              listStores.map((store, index) => {
+                const storeId = store.storeId ?? store.id ?? "";
+                const name = getStoreName(store);
+                const price = getMainPriceText(store);
+                const category = getCategoryText(store);
+                const { status, color, variant } = getStoreStatus(store);
+                return (
+                  <div key={storeId} data-store-index={index}>
+                  <ListRow
+                    onClick={() => {
+                      setSelectedStore(store);
+                      const lat = store.locationDto?.latitude;
+                      const lng = store.locationDto?.longitude;
+                      if (lat != null && lng != null) {
+                        setLabelStore({ name: getStoreName(store), lat, lng });
+                        programmaticPanRef.current = true;
+                        setFocusLocation({ lat, lng, key: Date.now() });
+                      }
+                    }}
+                    left={
+                      <ListRow.AssetIcon
+                        size="medium"
+                        name="icon-store-mono"
+                        backgroundColor={adaptive.greyOpacity100}
+                      />
                     }
-                    middleProps={{ color: adaptive.grey800 }}
-                    bottom={store.category}
-                    bottomProps={{ color: adaptive.grey600 }}
+                    contents={
+                      <ListRow.Texts
+                        type="3RowTypeA"
+                        top={name}
+                        topProps={{ color: adaptive.grey800, fontWeight: "bold" }}
+                        middle={
+                          <Paragraph.Text>
+                            <b style={{ color: adaptive.blue500 }}>{price}</b>
+                          </Paragraph.Text>
+                        }
+                        middleProps={{ color: adaptive.grey800 }}
+                        bottom={category}
+                        bottomProps={{ color: adaptive.grey600 }}
+                      />
+                    }
+                    right={
+                      <Badge size="small" color={color} variant={variant}>
+                        {status}
+                      </Badge>
+                    }
+                    verticalPadding="large"
                   />
-                }
-                right={
-                  <Badge
-                    size="small"
-                    color={store.badgeColor}
-                    variant={store.badgeVariant}
-                  >
-                    {store.status}
-                  </Badge>
-                }
-                verticalPadding="large"
-              />
-            ))}
+                  </div>
+                );
+              })
+            )}
             <Spacing size={24} />
           </div>
         </div>
@@ -432,12 +518,26 @@ export default function MapPage() {
 
       <BottomSheet
         open={selectedStore != null}
-        onClose={() => setSelectedStore(null)}
-        header={<BottomSheet.Header>{selectedStore?.name}</BottomSheet.Header>}
+        onClose={() => { setSelectedStore(null); setLabelStore(null); }}
+        header={<BottomSheet.Header>{selectedStore ? getStoreName(selectedStore) : ""}</BottomSheet.Header>}
         headerDescription={
           <BottomSheet.HeaderDescription>
             {selectedStore &&
-              `${selectedStore.address} · ${selectedStore.distance}\n${selectedStore.status} ${selectedStore.closingTime}`}
+              (() => {
+                const { status } = getStoreStatus(selectedStore);
+                const closing = getClosingTime(selectedStore);
+                const address = selectedStore.locationDto?.address ?? "";
+                const distance =
+                  myLocation && selectedStore.locationDto
+                    ? calcDistance(
+                        myLocation.lat,
+                        myLocation.lng,
+                        selectedStore.locationDto.latitude,
+                        selectedStore.locationDto.longitude,
+                      )
+                    : "";
+                return `${address}${distance ? ` · ${distance}` : ""}\n${status}${closing ? ` ${closing}` : ""}`;
+              })()}
           </BottomSheet.HeaderDescription>
         }
         cta={
@@ -447,12 +547,12 @@ export default function MapPage() {
           />
         }
       >
-        {selectedStore?.drinks.map((drink) => (
+        {selectedStore?.mainDrinkDtos?.filter((d) => d.type === "SOJU" || d.type === "BEER").map((drink) => (
           <ListRow
-            key={drink.name}
+            key={drink.type}
             left={
               <ListRow.AssetImage
-                src={drink.emoji}
+                src={DRINK_EMOJIS[drink.type] ?? "https://static.toss.im/2d-emojis/png/4x/uE100.png"}
                 shape="squircle"
                 scale={0.66}
                 backgroundColor={adaptive.greyOpacity100}
@@ -462,9 +562,9 @@ export default function MapPage() {
             contents={
               <ListRow.Texts
                 type="2RowTypeD"
-                top={drink.name}
+                top={DRINK_LABELS[drink.type] ?? drink.type}
                 topProps={{ color: adaptive.grey600 }}
-                bottom={drink.price}
+                bottom={drink.price != null ? `${drink.price.toLocaleString()}원` : ""}
                 bottomProps={{ color: adaptive.grey800, fontWeight: "bold" }}
               />
             }
