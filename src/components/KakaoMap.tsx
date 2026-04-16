@@ -11,7 +11,12 @@ export interface StoreForMap {
   longitude?: number;
   isCertified?: boolean;
   isAlwaysOpen?: boolean;
-  operationInfoDtos?: { dayOfWeek: string; openTime?: string; closeTime?: string; isClosed?: boolean }[];
+  operationInfoDtos?: {
+    dayOfWeek: string;
+    openTime?: string;
+    closeTime?: string;
+    isClosed?: boolean;
+  }[];
   postCount?: number;
 }
 
@@ -24,18 +29,33 @@ interface KakaoMapProps {
   labelStore?: { name: string; lat: number; lng: number } | null;
   focusLocation?: { lat: number; lng: number; key?: number } | null;
   onMarkerClick?: (storeId: number | string) => void;
-  onMarkerGroupClick?: (storeId: number | string, ids: (number | string)[]) => void;
+  onMarkerGroupClick?: (
+    storeId: number | string,
+    ids: (number | string)[],
+  ) => void;
   onMapMoved?: (lat: number, lng: number) => void;
 }
 
 const DRINK_THEME: Record<string, { color: string; icon: string }> = {
-  SOJU: { color: "#2BC26B", icon: "https://static.toss.im/2d-emojis/png/4x/uE100.png" },
-  BEER: { color: "#F5A623", icon: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png" },
+  SOJU: {
+    color: "#2BC26B",
+    icon: "https://static.toss.im/2d-emojis/png/4x/uE100.png",
+  },
+  BEER: {
+    color: "#F5A623",
+    icon: "https://static.toss.im/2d-emojis/png/4x/u1F37A.png",
+  },
 };
 
-const MARKER_HTML = (count: number, color: string, icon: string, priceLabel: string) => {
+const MARKER_HTML = (
+  count: number,
+  color: string,
+  icon: string,
+  priceLabel: string,
+  showCountBadge: boolean,
+) => {
   const badge =
-    count > 1
+    showCountBadge && count > 1
       ? `<div style="position:absolute;top:-4px;right:-4px;background:#3182f6;color:#fff;font-size:9px;font-weight:700;border-radius:100px;min-width:14px;height:14px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${count}</div>`
       : "";
   return `<div style="position:relative;cursor:pointer;transform:translateY(-2px);">
@@ -51,7 +71,15 @@ function isOpenNow(store: StoreForMap): boolean {
   if (store.isAlwaysOpen) return true;
   const ops = store.operationInfoDtos ?? [];
   if (!ops.length) return false;
-  const days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+  const days = [
+    "SUNDAY",
+    "MONDAY",
+    "TUESDAY",
+    "WEDNESDAY",
+    "THURSDAY",
+    "FRIDAY",
+    "SATURDAY",
+  ];
   const today = ops.find((o) => o.dayOfWeek === days[new Date().getDay()]);
   if (!today || today.isClosed) return false;
   const toSec = (t?: string) => {
@@ -62,8 +90,27 @@ function isOpenNow(store: StoreForMap): boolean {
   const cur = new Date().getHours() * 3600 + new Date().getMinutes() * 60;
   const open = toSec(today.openTime);
   const close = toSec(today.closeTime);
-  if (open != null && close != null && (cur < open || cur > close)) return false;
+  if (open != null && close != null && (cur < open || cur > close))
+    return false;
   return true;
+}
+
+function getMarkerDrink(store: StoreForMap, selectedDrinkType: string) {
+  return (
+    store.mainDrinkDtos?.find((d) => d.type === selectedDrinkType) ??
+    store.mainDrinkDtos?.[0]
+  );
+}
+
+function getLowestPriceLabel(stores: StoreForMap[], selectedDrinkType: string) {
+  const lowestPrice = stores.reduce<number | null>((minPrice, store) => {
+    const price = getMarkerDrink(store, selectedDrinkType)?.price;
+    if (price == null) return minPrice;
+    if (minPrice == null) return price;
+    return Math.min(minPrice, price);
+  }, null);
+
+  return lowestPrice != null ? `${lowestPrice.toLocaleString()}\uC6D0` : "-";
 }
 
 export default function KakaoMap({
@@ -90,10 +137,18 @@ export default function KakaoMap({
   const onMarkerClickRef = useRef(onMarkerClick);
   const onMarkerGroupClickRef = useRef(onMarkerGroupClick);
   const storesRef = useRef(stores);
-  useEffect(() => { onMapMovedRef.current = onMapMoved; }, [onMapMoved]);
-  useEffect(() => { onMarkerClickRef.current = onMarkerClick; }, [onMarkerClick]);
-  useEffect(() => { onMarkerGroupClickRef.current = onMarkerGroupClick; }, [onMarkerGroupClick]);
-  useEffect(() => { storesRef.current = stores; }, [stores]);
+  useEffect(() => {
+    onMapMovedRef.current = onMapMoved;
+  }, [onMapMoved]);
+  useEffect(() => {
+    onMarkerClickRef.current = onMarkerClick;
+  }, [onMarkerClick]);
+  useEffect(() => {
+    onMarkerGroupClickRef.current = onMarkerGroupClick;
+  }, [onMarkerGroupClick]);
+  useEffect(() => {
+    storesRef.current = stores;
+  }, [stores]);
 
   const clearMarkers = () => {
     markersRef.current.forEach((m) => m.setMap(null));
@@ -103,6 +158,11 @@ export default function KakaoMap({
   const renderMarkers = (kakao: any, map: any, storeList: StoreForMap[]) => {
     clearMarkers();
     if (!storeList.length) return;
+
+    type VisibleMarkerGroup = {
+      anchorStore: StoreForMap;
+      stores: StoreForMap[];
+    };
 
     // 1. 좌표 기준으로 그룹화
     const coordGroups: Record<string, StoreForMap[]> = {};
@@ -119,14 +179,21 @@ export default function KakaoMap({
     // Kakao level: 낮을수록 줌인, 높을수록 줌아웃
     const level: number = map.getLevel();
     const gridSize =
-      level >= 8 ? 160 :
-      level >= 7 ? 120 :
-      level >= 6 ? 90  :
-      level >= 5 ? 60  :
-      level >= 4 ? 40  :
-      level >= 3 ? 20  : 0;
+      level >= 8
+        ? 160
+        : level >= 7
+          ? 120
+          : level >= 6
+            ? 90
+            : level >= 5
+              ? 60
+              : level >= 4
+                ? 40
+                : level >= 3
+                  ? 20
+                  : 0;
 
-    let visibleGroups: Record<string, StoreForMap[]>;
+    let visibleGroups: VisibleMarkerGroup[];
 
     if (gridSize > 0) {
       // 3. 우선순위 정렬: 인증 > 영업중 > 중심과 가까운 순 > 게시물 수
@@ -138,7 +205,9 @@ export default function KakaoMap({
         const rep = group[0];
         const slat = rep.locationDto?.latitude ?? rep.latitude ?? 0;
         const slng = rep.locationDto?.longitude ?? rep.longitude ?? 0;
-        const pt = proj.containerPointFromCoords(new kakao.maps.LatLng(slat, slng));
+        const pt = proj.containerPointFromCoords(
+          new kakao.maps.LatLng(slat, slng),
+        );
         const dx = pt.x - centerPt.x;
         const dy = pt.y - centerPt.y;
         return {
@@ -160,47 +229,60 @@ export default function KakaoMap({
       });
 
       // 4. 화면 그리드 셀당 하나의 대표 마커만 표시
-      const occupied: Record<string, boolean> = {};
-      visibleGroups = {};
+      const occupied: Record<string, number> = {};
+      visibleGroups = [];
       for (const e of enriched) {
         const gx = Math.floor(e.pt.x / gridSize);
         const gy = Math.floor(e.pt.y / gridSize);
         const cellKey = `${gx},${gy}`;
-        if (!occupied[cellKey]) {
-          occupied[cellKey] = true;
-          visibleGroups[e.key] = e.group;
+        const visibleIndex = occupied[cellKey];
+        if (visibleIndex == null) {
+          occupied[cellKey] = visibleGroups.length;
+          visibleGroups.push({
+            anchorStore: e.group[0],
+            stores: [...e.group],
+          });
+        } else {
+          visibleGroups[visibleIndex].stores.push(...e.group);
         }
       }
     } else {
       // 줌인 시 클러스터링 없이 좌표 그룹 그대로 표시
-      visibleGroups = coordGroups;
+      visibleGroups = Object.values(coordGroups).map((group) => ({
+        anchorStore: group[0],
+        stores: group,
+      }));
     }
 
     // 5. 마커 렌더링
-    Object.values(visibleGroups).forEach((group) => {
-      const slat = group[0].locationDto?.latitude ?? group[0].latitude!;
-      const slng = group[0].locationDto?.longitude ?? group[0].longitude!;
+    visibleGroups.forEach(({ anchorStore, stores: group }) => {
+      const slat = anchorStore.locationDto?.latitude ?? anchorStore.latitude!;
+      const slng = anchorStore.locationDto?.longitude ?? anchorStore.longitude!;
       const position = new kakao.maps.LatLng(slat, slng);
       const count = group.length;
+      const showCountBadge = gridSize === 0;
       const theme = DRINK_THEME[selectedDrinkType] ?? DRINK_THEME.SOJU;
-      const drink =
-        group[0].mainDrinkDtos?.find((d) => d.type === selectedDrinkType) ??
-        group[0].mainDrinkDtos?.[0];
-      const priceLabel = drink?.price != null ? `${drink.price.toLocaleString()}원` : "-";
+      const priceLabel = getLowestPriceLabel(group, selectedDrinkType);
 
       const container = document.createElement("div");
-      container.innerHTML = MARKER_HTML(count, theme.color, theme.icon, priceLabel);
+      container.innerHTML = MARKER_HTML(
+        count,
+        theme.color,
+        theme.icon,
+        priceLabel,
+        showCountBadge,
+      );
       container.addEventListener("click", () => {
         if (currentOverlayRef.current) {
           currentOverlayRef.current.setMap(null);
           currentOverlayRef.current = null;
         }
         if (group.length > 1) {
-          const id = group[0].storeId ?? group[0].id ?? "";
+          const id = anchorStore.storeId ?? anchorStore.id ?? "";
           const ids = group.map((s) => s.storeId ?? s.id ?? "");
           onMarkerGroupClickRef.current?.(id, ids);
         } else {
-          const id = group[0].storeId ?? group[0].id ?? "";
+          const id = anchorStore.storeId ?? anchorStore.id ?? "";
           onMarkerClickRef.current?.(id);
         }
       });
@@ -370,7 +452,10 @@ export default function KakaoMap({
   useEffect(() => {
     if (!mapInstance.current || !window.kakao?.maps || !focusLocation) return;
     const kakao = window.kakao;
-    const position = new kakao.maps.LatLng(focusLocation.lat, focusLocation.lng);
+    const position = new kakao.maps.LatLng(
+      focusLocation.lat,
+      focusLocation.lng,
+    );
     try {
       const proj = mapInstance.current.getProjection();
       const screenPt = proj.containerPointFromCoords(position);
