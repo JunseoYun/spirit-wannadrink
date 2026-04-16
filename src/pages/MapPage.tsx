@@ -649,10 +649,6 @@ export default function MapPage() {
                     margin: "0 6px",
                     outline: "none",
                     border: "none",
-                    borderBottom:
-                      selectedChip === i
-                        ? `2px solid ${adaptive.blue500}`
-                        : "none",
                     background: "#fff",
                     color:
                       selectedChip === i ? adaptive.blue500 : adaptive.grey600,
