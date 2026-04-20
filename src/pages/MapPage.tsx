@@ -76,7 +76,7 @@ function getMainPriceText(store: StoreItem, drinkType?: string) {
   if (!drink) return "";
   const label = DRINK_LABELS[drink.type] || drink.type;
   const price = drink.price != null ? ` ${drink.price.toLocaleString()}원` : "";
-  return label + price;
+  return price;
 }
 
 function getCategoryText(store: StoreItem) {
@@ -89,7 +89,6 @@ function getStoreStatus(store: StoreItem): {
   color: "blue" | "elephant";
   variant: "fill" | "weak";
 } {
-  console.log(store);
   if (store.isAlwaysOpen)
     return { status: "24시간 영업", color: "blue", variant: "fill" };
 
@@ -231,10 +230,9 @@ export default function MapPage() {
       setShowSearchHere(false);
       const drinkType = DRINK_TYPES[selectedChip];
       try {
-        const [markers, list, address] = await Promise.all([
-          getStoreMarkers(lat, lng, 2, drinkType),
-          getStoreList(lat, lng, 2, 0, drinkType),
-          getAddressFromCoords(lat, lng),
+        const [markers, list] = await Promise.all([
+          getStoreMarkers(lat, lng, 2, drinkType, maxPrice),
+          getStoreList(lat, lng, 2, 0, drinkType, maxPrice),
         ]);
         const matchesMaxPrice = (store: StoreItem) => {
           if (maxPrice == null) return true;
@@ -274,8 +272,7 @@ export default function MapPage() {
             setLabelStore(null);
           }
         }
-      } catch (e) {
-        console.error("매장 조회 실패", e);
+      } catch {
       } finally {
         setLoadingStores(false);
       }
@@ -334,8 +331,7 @@ export default function MapPage() {
         (await (async () => {
           try {
             return await getStorePreview(storeId);
-          } catch (e) {
-            console.error("매장 상세 조회 실패", e);
+          } catch {
             return null;
           }
         })());
@@ -715,11 +711,21 @@ export default function MapPage() {
                         }
                       }}
                       left={
-                        <ListRow.AssetIcon
-                          size="medium"
-                          name="icon-store-mono"
-                          backgroundColor={adaptive.greyOpacity100}
-                        />
+                        store.mainImgUrl ? (
+                          <ListRow.AssetImage
+                            src={store.mainImgUrl}
+                            shape="squircle"
+                            scaleType="crop"
+                            backgroundColor={adaptive.greyOpacity100}
+                            size="medium"
+                          />
+                        ) : (
+                          <ListRow.AssetIcon
+                            size="medium"
+                            name="icon-store-mono"
+                            backgroundColor={adaptive.greyOpacity100}
+                          />
+                        )
                       }
                       contents={
                         <ListRow.Texts
@@ -731,7 +737,9 @@ export default function MapPage() {
                           }}
                           middle={
                             <Paragraph.Text>
-                              <b style={{ color: adaptive.blue500 }}>{price}</b>
+                              <b style={{ color: adaptive.blue500 }}>
+                                {status}
+                              </b>
                             </Paragraph.Text>
                           }
                           middleProps={{ color: adaptive.grey800 }}
@@ -740,8 +748,8 @@ export default function MapPage() {
                         />
                       }
                       right={
-                        <Badge size="small" color={color} variant={variant}>
-                          {status}
+                        <Badge size="medium" color="blue" variant={variant}>
+                          {price}
                         </Badge>
                       }
                       verticalPadding="large"
