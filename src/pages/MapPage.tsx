@@ -51,6 +51,15 @@ const DRINK_EMOJIS: Record<string, string> = {
   HIGHBALL: "https://static.toss.im/2d-emojis/png/4x/u1F943.png",
 };
 
+const DRINK_PRICE_COLORS: Record<string, string> = {
+  SOJU: "#2BC26B",
+  BEER: "#F5A623",
+};
+
+function getDrinkBadgeColor(drinkType?: string): "green" | "yellow" {
+  return drinkType === "SOJU" ? "green" : "yellow";
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
   IZAKAYA: "이자카야",
   KOREAN: "한식",
@@ -487,10 +496,8 @@ export default function MapPage() {
             pointerEvents: "auto",
           }}
         >
-          {maxPrice != null ? `~${maxPrice.toLocaleString()}원` : "가격"}
-          {maxPrice != null ? (
-            <span style={{ fontSize: 14, lineHeight: 1 }}>×</span>
-          ) : (
+          {maxPrice != null ? `~${maxPrice.toLocaleString()} 원` : "가격"}
+          {maxPrice != null ? null : (
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
               <path
                 d="M6 2.5v7M2.5 6h7"
@@ -647,7 +654,11 @@ export default function MapPage() {
                     border: "none",
                     background: "#fff",
                     color:
-                      selectedChip === i ? adaptive.blue500 : adaptive.grey600,
+                      selectedChip === i
+                        ? i === 0
+                          ? "#2BC26B"
+                          : "#F5A623"
+                        : adaptive.grey600,
                     fontSize: 13,
                     fontWeight: 600,
                     cursor: "pointer",
@@ -687,10 +698,8 @@ export default function MapPage() {
               listStores.map((store, index) => {
                 const storeId = store.storeId ?? store.id ?? "";
                 const name = getStoreName(store);
-                const price = getMainPriceText(
-                  store,
-                  DRINK_TYPES[selectedChip],
-                );
+                const drinkType = DRINK_TYPES[selectedChip];
+                const price = getMainPriceText(store, drinkType);
                 const category = getCategoryText(store);
                 const { status, color, variant } = getStoreStatus(store);
                 return (
@@ -748,7 +757,11 @@ export default function MapPage() {
                         />
                       }
                       right={
-                        <Badge size="medium" color="blue" variant={variant}>
+                        <Badge
+                          size="medium"
+                          color={getDrinkBadgeColor(drinkType)}
+                          variant="weak"
+                        >
                           {price}
                         </Badge>
                       }
@@ -872,8 +885,18 @@ export default function MapPage() {
                   maxPrice === price
                     ? "none"
                     : `1.5px solid ${adaptive.grey200}`,
-                background: maxPrice === price ? "#3182f6" : "#fff",
-                color: maxPrice === price ? "#fff" : adaptive.grey700,
+                background:
+                  maxPrice === price
+                    ? selectedChip === 0
+                      ? "#D5EFE7"
+                      : "#FFF2DD"
+                    : "#fff",
+                color:
+                  maxPrice === price
+                    ? selectedChip === 0
+                      ? "#18895D"
+                      : "#DA7C03"
+                    : adaptive.grey700,
                 fontSize: 14,
                 fontWeight: 600,
                 cursor: "pointer",
