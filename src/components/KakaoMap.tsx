@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { getBusinessStatus } from "../utils/businessHours";
 
 export interface StoreForMap {
   id?: number | string;
@@ -69,30 +70,7 @@ const MARKER_HTML = (
 
 function isOpenNow(store: StoreForMap): boolean {
   if (store.isAlwaysOpen) return true;
-  const ops = store.operationInfoDtos ?? [];
-  if (!ops.length) return false;
-  const days = [
-    "SUNDAY",
-    "MONDAY",
-    "TUESDAY",
-    "WEDNESDAY",
-    "THURSDAY",
-    "FRIDAY",
-    "SATURDAY",
-  ];
-  const today = ops.find((o) => o.dayOfWeek === days[new Date().getDay()]);
-  if (!today || today.isClosed) return false;
-  const toSec = (t?: string) => {
-    if (!t) return null;
-    const p = t.split(":");
-    return parseInt(p[0]) * 3600 + parseInt(p[1]) * 60;
-  };
-  const cur = new Date().getHours() * 3600 + new Date().getMinutes() * 60;
-  const open = toSec(today.openTime);
-  const close = toSec(today.closeTime);
-  if (open != null && close != null && (cur < open || cur > close))
-    return false;
-  return true;
+  return getBusinessStatus(store.operationInfoDtos).isOpen;
 }
 
 function getMarkerDrink(store: StoreForMap, selectedDrinkType: string) {
@@ -137,6 +115,7 @@ export default function KakaoMap({
   const onMarkerClickRef = useRef(onMarkerClick);
   const onMarkerGroupClickRef = useRef(onMarkerGroupClick);
   const storesRef = useRef(stores);
+  const selectedDrinkTypeRef = useRef(selectedDrinkType);
   useEffect(() => {
     onMapMovedRef.current = onMapMoved;
   }, [onMapMoved]);
@@ -149,13 +128,21 @@ export default function KakaoMap({
   useEffect(() => {
     storesRef.current = stores;
   }, [stores]);
+  useEffect(() => {
+    selectedDrinkTypeRef.current = selectedDrinkType;
+  }, [selectedDrinkType]);
 
   const clearMarkers = () => {
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
   };
 
-  const renderMarkers = (kakao: any, map: any, storeList: StoreForMap[]) => {
+  const renderMarkers = (
+    kakao: any,
+    map: any,
+    storeList: StoreForMap[],
+    drinkType = selectedDrinkTypeRef.current,
+  ) => {
     clearMarkers();
     if (!storeList.length) return;
 
@@ -261,8 +248,8 @@ export default function KakaoMap({
       const position = new kakao.maps.LatLng(slat, slng);
       const count = group.length;
       const showCountBadge = gridSize === 0;
-      const theme = DRINK_THEME[selectedDrinkType] ?? DRINK_THEME.SOJU;
-      const priceLabel = getLowestPriceLabel(group, selectedDrinkType);
+      const theme = DRINK_THEME[drinkType] ?? DRINK_THEME.SOJU;
+      const priceLabel = getLowestPriceLabel(group, drinkType);
 
       const container = document.createElement("div");
       container.innerHTML = MARKER_HTML(
@@ -373,7 +360,7 @@ export default function KakaoMap({
   // stores 변경 시 마커 재렌더
   useEffect(() => {
     if (!mapInstance.current || !window.kakao?.maps) return;
-    renderMarkers(window.kakao, mapInstance.current, stores);
+    renderMarkers(window.kakao, mapInstance.current, stores, selectedDrinkType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stores, selectedDrinkType]);
 

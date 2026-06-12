@@ -16,6 +16,7 @@ import KakaoMap from "../components/KakaoMap";
 import { getStoreMarkers, getStoreList, getStorePreview } from "../api/store";
 import type { StoreItem } from "../api/store";
 import { getAddressFromCoords } from "../api/location";
+import { getBusinessStatus } from "../utils/businessHours";
 
 declare global {
   interface Window {
@@ -101,35 +102,16 @@ function getStoreStatus(store: StoreItem): {
   if (store.isAlwaysOpen)
     return { status: "24시간 영업", color: "blue", variant: "fill" };
 
-  const days = [
-    "SUNDAY",
-    "MONDAY",
-    "TUESDAY",
-    "WEDNESDAY",
-    "THURSDAY",
-    "FRIDAY",
-    "SATURDAY",
-  ];
-  const today = days[new Date().getDay()];
-  const info = store.operationInfoDtos?.find((d) => d.dayOfWeek === today);
+  const businessStatus = getBusinessStatus(store.operationInfoDtos);
 
-  if (!info || info.isClosed)
-    return { status: "영업 종료", color: "elephant", variant: "weak" };
-
-  const toSec = (t?: string) => {
-    if (!t) return null;
-    const p = t.split(":");
-    return parseInt(p[0]) * 3600 + parseInt(p[1]) * 60;
-  };
-  const now = new Date();
-  const cur = now.getHours() * 3600 + now.getMinutes() * 60;
-  const open = toSec(info.openTime);
-  const close = toSec(info.closeTime);
-
-  if (open != null && close != null && (cur < open || cur > close)) {
+  if (!businessStatus.isOpen) {
     return { status: "영업 종료", color: "elephant", variant: "weak" };
   }
-  if (close != null && close - cur <= 1800 && close - cur > 0) {
+  if (
+    businessStatus.secondsUntilClose != null &&
+    businessStatus.secondsUntilClose <= 1800 &&
+    businessStatus.secondsUntilClose > 0
+  ) {
     return { status: "곧 영업 마감", color: "blue", variant: "weak" };
   }
   return { status: "영업 중", color: "blue", variant: "fill" };
@@ -137,19 +119,9 @@ function getStoreStatus(store: StoreItem): {
 
 function getClosingTime(store: StoreItem) {
   if (store.isAlwaysOpen) return "24시간";
-  const days = [
-    "SUNDAY",
-    "MONDAY",
-    "TUESDAY",
-    "WEDNESDAY",
-    "THURSDAY",
-    "FRIDAY",
-    "SATURDAY",
-  ];
-  const today = days[new Date().getDay()];
-  const info = store.operationInfoDtos?.find((d) => d.dayOfWeek === today);
-  if (!info?.closeTime) return "";
-  const parts = info.closeTime.split(":");
+  const { closeTime } = getBusinessStatus(store.operationInfoDtos);
+  if (!closeTime) return "";
+  const parts = closeTime.split(":");
   return `${parts[0]}:${parts[1]}`;
 }
 
