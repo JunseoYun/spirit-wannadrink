@@ -8,7 +8,6 @@ import {
   Paragraph,
   Skeleton,
   Spacing,
-  Tooltip,
   useToast,
 } from "@toss/tds-mobile";
 import { adaptive } from "@toss/tds-colors";
@@ -20,11 +19,13 @@ import { getBusinessStatus } from "../utils/businessHours";
 
 declare global {
   interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     kakao: any;
   }
 }
 
 const CHIP_ITEMS = ["소주", "맥주"];
+const DRINK_TYPES = ["SOJU", "BEER"];
 
 const DRINK_LABELS: Record<string, string> = {
   SOJU: "소주",
@@ -50,11 +51,6 @@ const DRINK_EMOJIS: Record<string, string> = {
   SAKE: "https://static.toss.im/2d-emojis/png/4x/u1F376.png",
   WHISKEY: "https://static.toss.im/2d-emojis/png/4x/u1F943.png",
   HIGHBALL: "https://static.toss.im/2d-emojis/png/4x/u1F943.png",
-};
-
-const DRINK_PRICE_COLORS: Record<string, string> = {
-  SOJU: "#2BC26B",
-  BEER: "#F5A623",
 };
 
 function getDrinkBadgeColor(drinkType?: string): "green" | "yellow" {
@@ -84,7 +80,6 @@ function getMainPriceText(store: StoreItem, drinkType?: string) {
       store.mainDrinkDtos?.[0])
     : store.mainDrinkDtos?.[0];
   if (!drink) return "";
-  const label = DRINK_LABELS[drink.type] || drink.type;
   const price = drink.price != null ? ` ${drink.price.toLocaleString()}원` : "";
   return price;
 }
@@ -157,6 +152,7 @@ export default function MapPage() {
   const [listStores, setListStores] = useState<StoreItem[]>([]);
   const [selectedStore, setSelectedStore] = useState<StoreItem | null>(null);
   const [loadingStores, setLoadingStores] = useState(true);
+  const [loadingMoreStores, setLoadingMoreStores] = useState(false);
   const [showSearchHere, setShowSearchHere] = useState(false);
   const [labelStore, setLabelStore] = useState<{
     name: string;
@@ -173,6 +169,69 @@ export default function MapPage() {
   const programmaticPanRef = useRef(false);
   const focusFirstOnNextFetchRef = useRef(false);
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentListPageRef = useRef(0);
+  const hasMoreStoresRef = useRef(true);
+  const loadingMoreStoresRef = useRef(false);
+  const listQueryCenterRef = useRef({ lat: DEFAULT_LAT, lng: DEFAULT_LNG });
+  const { openToast } = useToast();
+  const touchStartY = useRef(0);
+  const dragging = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const loadMoreStores = useCallback(async () => {
+    if (
+      loadingStores ||
+      loadingMoreStoresRef.current ||
+      !hasMoreStoresRef.current
+    ) {
+      return;
+    }
+
+    const nextPage = currentListPageRef.current + 1;
+    const drinkType = DRINK_TYPES[selectedChip];
+
+    loadingMoreStoresRef.current = true;
+    setLoadingMoreStores(true);
+    try {
+      const nextList = await getStoreList(
+        listQueryCenterRef.current.lat,
+        listQueryCenterRef.current.lng,
+        2,
+        nextPage,
+        drinkType,
+        maxPrice,
+      );
+      const filteredNextList = nextList.filter((store) => {
+        if (maxPrice == null) return true;
+        const drink = store.mainDrinkDtos?.find((d) => d.type === drinkType);
+        return drink?.price != null && drink.price <= maxPrice;
+      });
+
+      if (nextList.length === 0) {
+        hasMoreStoresRef.current = false;
+        return;
+      }
+
+      currentListPageRef.current = nextPage;
+      setListStores((prev) => {
+        const seenKeys = new Set(
+          prev.map((store) => String(store.storeId ?? store.id ?? "")),
+        );
+        const storesToAppend = filteredNextList.filter((store) => {
+          const key = String(store.storeId ?? store.id ?? "");
+          if (!key || seenKeys.has(key)) return false;
+          seenKeys.add(key);
+          return true;
+        });
+        return [...prev, ...storesToAppend];
+      });
+    } catch {
+      // 다음 페이지 조회 실패 시 기존 목록은 유지한다.
+    } finally {
+      loadingMoreStoresRef.current = false;
+      setLoadingMoreStores(false);
+    }
+  }, [loadingStores, selectedChip, maxPrice]);
 
   const handleListScroll = useCallback(() => {
     if (scrollThrottleRef.current) return;
@@ -180,34 +239,23 @@ export default function MapPage() {
       scrollThrottleRef.current = null;
       const container = scrollRef.current;
       if (!container || !listStores.length) return;
-      const containerTop = container.getBoundingClientRect().top;
-      const items = container.querySelectorAll("[data-store-index]");
-      for (const item of items) {
-        const rect = item.getBoundingClientRect();
-        if (rect.bottom > containerTop) {
-          const idx = parseInt(item.getAttribute("data-store-index") ?? "0");
-          const store = listStores[idx];
-          const lat = store?.locationDto?.latitude;
-          const lng = store?.locationDto?.longitude;
-          if (lat != null && lng != null) {
-            programmaticPanRef.current = true;
-            setFocusLocation({ lat, lng, key: Date.now() });
-          }
-          break;
-        }
+
+      const distanceToBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (distanceToBottom < 160) {
+        loadMoreStores();
       }
     }, 150);
-  }, [listStores]);
-  const { openToast } = useToast();
-  const touchStartY = useRef(0);
-  const dragging = useRef(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  const DRINK_TYPES = ["SOJU", "BEER"];
+  }, [listStores, loadMoreStores]);
 
   const fetchStores = useCallback(
     async (lat: number, lng: number) => {
       setLoadingStores(true);
+      setLoadingMoreStores(false);
+      loadingMoreStoresRef.current = false;
+      currentListPageRef.current = 0;
+      hasMoreStoresRef.current = true;
+      listQueryCenterRef.current = { lat, lng };
       setShowSearchHere(false);
       const drinkType = DRINK_TYPES[selectedChip];
       try {
@@ -241,6 +289,7 @@ export default function MapPage() {
         });
 
         setListStores(filteredList);
+        hasMoreStoresRef.current = list.length > 0;
         setMarkerStores(mergedMarkers);
         if (focusFirstOnNextFetchRef.current) {
           focusFirstOnNextFetchRef.current = false;
@@ -254,6 +303,7 @@ export default function MapPage() {
           }
         }
       } catch {
+        // 조회 실패 시 기존 상태를 유지한다.
       } finally {
         setLoadingStores(false);
       }
@@ -313,6 +363,7 @@ export default function MapPage() {
           try {
             return await getStorePreview(storeId);
           } catch {
+            // 미리보기 조회 실패 시 선택 동작을 무시한다.
             return null;
           }
         })());
@@ -322,10 +373,25 @@ export default function MapPage() {
       const lng = store.locationDto?.longitude;
       if (lat != null && lng != null) {
         setLabelStore({ name: getStoreName(store), lat, lng });
+        setMapCenter({ lat, lng });
+        programmaticPanRef.current = true;
+        setFocusLocation({ lat, lng, key: Date.now() });
       }
     },
     [listStores],
   );
+
+  const focusStoreOnMap = useCallback((store: StoreItem) => {
+    const lat = store.locationDto?.latitude;
+    const lng = store.locationDto?.longitude;
+    if (lat == null || lng == null) return;
+
+    setLabelStore({ name: getStoreName(store), lat, lng });
+    setMapCenter({ lat, lng });
+    setShowList(false);
+    programmaticPanRef.current = true;
+    setFocusLocation({ lat, lng, key: Date.now() });
+  }, []);
 
   // 인디케이터 drag
   const onHandleTouchStart = (e: React.TouchEvent) => {
@@ -372,34 +438,13 @@ export default function MapPage() {
         lng={mapCenter.lng}
         stores={markerStores}
         selectedDrinkType={DRINK_TYPES[selectedChip]}
+        selectedStoreId={selectedStore?.storeId ?? selectedStore?.id ?? null}
         myLocation={myLocation}
         labelStore={labelStore}
         focusLocation={focusLocation}
         onMarkerClick={handleMarkerClick}
         onMapMoved={handleMapMoved}
       />
-
-      <div
-        style={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          zIndex: 10,
-          pointerEvents: "none",
-        }}
-      >
-        <Tooltip
-          message="한잔할까 신논현점"
-          messageAlign="left"
-          placement="top"
-          size="small"
-          clipToEnd="none"
-          motionVariant="weak"
-        >
-          <Spacing size={26} />
-        </Tooltip>
-      </div>
 
       <div
         style={{
@@ -603,10 +648,11 @@ export default function MapPage() {
               {!loadingStores && (
                 <>
                   {"주변 "}
-                  <span style={{ color: adaptive.blue500 }}>
+                  {/* <span style={{ color: adaptive.blue500 }}>
                     {markerStores.length}
                   </span>
-                  개 술집
+                  개  */}
+                  술집
                 </>
               )}
             </div>
@@ -673,23 +719,13 @@ export default function MapPage() {
                 const drinkType = DRINK_TYPES[selectedChip];
                 const price = getMainPriceText(store, drinkType);
                 const category = getCategoryText(store);
-                const { status, color, variant } = getStoreStatus(store);
+                const { status } = getStoreStatus(store);
                 return (
                   <div key={storeId} data-store-index={index}>
                     <ListRow
                       onClick={() => {
                         setSelectedStore(store);
-                        const lat = store.locationDto?.latitude;
-                        const lng = store.locationDto?.longitude;
-                        if (lat != null && lng != null) {
-                          setLabelStore({
-                            name: getStoreName(store),
-                            lat,
-                            lng,
-                          });
-                          programmaticPanRef.current = true;
-                          setFocusLocation({ lat, lng, key: Date.now() });
-                        }
+                        focusStoreOnMap(store);
                       }}
                       left={
                         store.mainImgUrl ? (
@@ -742,6 +778,18 @@ export default function MapPage() {
                   </div>
                 );
               })
+            )}
+            {loadingMoreStores && (
+              <div
+                style={{
+                  padding: "12px 16px",
+                  textAlign: "center",
+                  color: adaptive.grey500,
+                  fontSize: 13,
+                }}
+              >
+                불러오는 중...
+              </div>
             )}
             <Spacing size={24} />
           </div>

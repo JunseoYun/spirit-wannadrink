@@ -26,6 +26,7 @@ interface KakaoMapProps {
   lng: number;
   stores?: StoreForMap[];
   selectedDrinkType?: string;
+  selectedStoreId?: number | string | null;
   myLocation?: { lat: number; lng: number } | null;
   labelStore?: { name: string; lat: number; lng: number } | null;
   focusLocation?: { lat: number; lng: number; key?: number } | null;
@@ -54,13 +55,18 @@ const MARKER_HTML = (
   icon: string,
   priceLabel: string,
   showCountBadge: boolean,
+  selected: boolean,
 ) => {
   const badge =
     showCountBadge && count > 1
       ? `<div style="position:absolute;top:-4px;right:-4px;background:#3182f6;color:#fff;font-size:9px;font-weight:700;border-radius:100px;min-width:14px;height:14px;display:flex;align-items:center;justify-content:center;padding:0 3px;">${count}</div>`
       : "";
+  const ring = selected
+    ? `<div style="position:absolute;inset:-7px;border:3px solid #3182f6;border-radius:999px;box-shadow:0 0 0 4px rgba(49,130,246,0.16);"></div>`
+    : "";
   return `<div style="position:relative;cursor:pointer;transform:translateY(-2px);">
-    <div style="display:flex;align-items:center;gap:6px;height:34px;padding:0 10px;background:#fff;border:2px solid ${color};border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,0.16);white-space:nowrap;">
+    ${ring}
+    <div style="position:relative;display:flex;align-items:center;gap:6px;height:34px;padding:0 10px;background:#fff;border:2px solid ${selected ? "#3182f6" : color};border-radius:999px;box-shadow:${selected ? "0 4px 14px rgba(49,130,246,0.34)" : "0 1px 4px rgba(0,0,0,0.16)"};white-space:nowrap;">
       <img src="${icon}" alt="" style="width:18px;height:18px;flex-shrink:0;" />
       <span style="font-size:14px;line-height:1;font-weight:700;color:#0f172a;letter-spacing:-0.2px;">${priceLabel}</span>
     </div>
@@ -96,6 +102,7 @@ export default function KakaoMap({
   lng,
   stores = [],
   selectedDrinkType = "SOJU",
+  selectedStoreId = null,
   myLocation,
   labelStore = null,
   focusLocation = null,
@@ -116,6 +123,7 @@ export default function KakaoMap({
   const onMarkerGroupClickRef = useRef(onMarkerGroupClick);
   const storesRef = useRef(stores);
   const selectedDrinkTypeRef = useRef(selectedDrinkType);
+  const selectedStoreIdRef = useRef(selectedStoreId);
   useEffect(() => {
     onMapMovedRef.current = onMapMoved;
   }, [onMapMoved]);
@@ -131,10 +139,19 @@ export default function KakaoMap({
   useEffect(() => {
     selectedDrinkTypeRef.current = selectedDrinkType;
   }, [selectedDrinkType]);
+  useEffect(() => {
+    selectedStoreIdRef.current = selectedStoreId;
+  }, [selectedStoreId]);
 
   const clearMarkers = () => {
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
+  };
+
+  const isSelectedStore = (store: StoreForMap) => {
+    const selectedId = selectedStoreIdRef.current;
+    if (selectedId == null) return false;
+    return String(store.storeId ?? store.id ?? "") === String(selectedId);
   };
 
   const renderMarkers = (
@@ -200,6 +217,7 @@ export default function KakaoMap({
         return {
           key,
           group,
+          hasSelectedStore: group.some(isSelectedStore),
           isCertified: !!rep.isCertified,
           isOpen: isOpenNow(rep),
           dist2: dx * dx + dy * dy,
@@ -209,6 +227,8 @@ export default function KakaoMap({
       });
 
       enriched.sort((a, b) => {
+        if (a.hasSelectedStore !== b.hasSelectedStore)
+          return a.hasSelectedStore ? -1 : 1;
         if (a.isCertified !== b.isCertified) return a.isCertified ? -1 : 1;
         if (a.isOpen !== b.isOpen) return a.isOpen ? -1 : 1;
         if (a.dist2 !== b.dist2) return a.dist2 - b.dist2;
@@ -250,6 +270,7 @@ export default function KakaoMap({
       const showCountBadge = gridSize === 0;
       const theme = DRINK_THEME[drinkType] ?? DRINK_THEME.SOJU;
       const priceLabel = getLowestPriceLabel(group, drinkType);
+      const selected = group.some(isSelectedStore);
 
       const container = document.createElement("div");
       container.innerHTML = MARKER_HTML(
@@ -258,6 +279,7 @@ export default function KakaoMap({
         theme.icon,
         priceLabel,
         showCountBadge,
+        selected,
       );
       container.addEventListener("click", () => {
         if (currentOverlayRef.current) {
@@ -279,7 +301,7 @@ export default function KakaoMap({
         content: container,
         map,
         yAnchor: 1,
-        zIndex: 1,
+        zIndex: selected ? 30 : 1,
       });
 
       markersRef.current.push(marker);
@@ -362,7 +384,7 @@ export default function KakaoMap({
     if (!mapInstance.current || !window.kakao?.maps) return;
     renderMarkers(window.kakao, mapInstance.current, stores, selectedDrinkType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stores, selectedDrinkType]);
+  }, [stores, selectedDrinkType, selectedStoreId]);
 
   // 내 위치 변경 시 지도 이동 + 파란 점 마커
   useEffect(() => {
