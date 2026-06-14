@@ -38,6 +38,7 @@ export interface StoreItem {
   isCertified?: boolean;
   storeRate?: number;
   postCount?: number;
+  contact?: string;
   phoneNumber?: string;
 }
 
@@ -120,7 +121,6 @@ export async function getStorePreview(
   const url = `${BASE_URL}/api/store/get-by/preview/${storeId}`;
   const res = await authFetch(url);
   const data = await res.json();
-
   if (!res.ok) {
     throw new Error(`getStorePreview failed: ${res.status}`);
   }

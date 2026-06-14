@@ -443,7 +443,6 @@ export default function KakaoMap({
       "transform:translateY(-8px)",
     ].join(";");
     el.innerHTML =
-      `${labelStore.name}` +
       `<div style="position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);` +
       `width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;` +
       `border-top:6px solid #3182f6;"></div>`;

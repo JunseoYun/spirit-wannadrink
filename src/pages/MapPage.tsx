@@ -12,10 +12,30 @@ import {
 } from "@toss/tds-mobile";
 import { adaptive } from "@toss/tds-colors";
 import KakaoMap from "../components/KakaoMap";
+import kakaomapImage from "../assets/kakaomap.png";
+import tmapImage from "../assets/Tmap.jpeg";
+import navermap from "../assets/navermap.png";
 import { getStoreMarkers, getStoreList, getStorePreview } from "../api/store";
 import type { StoreItem } from "../api/store";
 import { getAddressFromCoords } from "../api/location";
 import { getBusinessStatus } from "../utils/businessHours";
+import { openURL } from "@apps-in-toss/web-framework";
+
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+const STORE_URLS = {
+  kakao: isIOS
+    ? "https://apps.apple.com/kr/app/id304608425"
+    : "https://play.google.com/store/apps/details?id=net.daum.android.map",
+
+  naver: isIOS
+    ? "https://apps.apple.com/kr/app/id311867728"
+    : "https://play.google.com/store/apps/details?id=com.nhn.android.nmap",
+
+  tmap: isIOS
+    ? "https://apps.apple.com/kr/app/id431589174"
+    : "https://play.google.com/store/apps/details?id=com.skt.tmap.ku",
+};
 
 declare global {
   interface Window {
@@ -166,6 +186,7 @@ export default function MapPage() {
   } | null>(null);
   const [maxPrice, setMaxPrice] = useState<number | null>(4000);
   const [showPricePicker, setShowPricePicker] = useState(false);
+  const [showDirectionsSheet, setShowDirectionsSheet] = useState(false);
   const programmaticPanRef = useRef(false);
   const focusFirstOnNextFetchRef = useRef(false);
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,6 +194,7 @@ export default function MapPage() {
   const hasMoreStoresRef = useRef(true);
   const loadingMoreStoresRef = useRef(false);
   const listQueryCenterRef = useRef({ lat: DEFAULT_LAT, lng: DEFAULT_LNG });
+  const selectedStoreRequestSeqRef = useRef(0);
   const { openToast } = useToast();
   const touchStartY = useRef(0);
   const dragging = useRef(false);
@@ -239,7 +261,6 @@ export default function MapPage() {
       scrollThrottleRef.current = null;
       const container = scrollRef.current;
       if (!container || !listStores.length) return;
-
       const distanceToBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
       if (distanceToBottom < 160) {
@@ -351,47 +372,66 @@ export default function MapPage() {
     setShowList(false);
   }, []);
 
-  // 마커 클릭 시 listStores에서 찾고, 없으면 preview 조회 + 이름 라벨 표시
-  const handleMarkerClick = useCallback(
-    async (storeId: number | string) => {
-      const found = listStores.find(
-        (s) => String(s.storeId ?? s.id) === String(storeId),
-      );
-      const store =
-        found ??
-        (await (async () => {
-          try {
-            return await getStorePreview(storeId);
-          } catch {
-            // 미리보기 조회 실패 시 선택 동작을 무시한다.
-            return null;
+  const selectStorePreview = useCallback(
+    async (
+      storeId: number | string,
+      source: "list" | "marker",
+      options?: { focusMap?: boolean; hideList?: boolean },
+    ) => {
+      if (storeId === "") return;
+
+      const requestSeq = selectedStoreRequestSeqRef.current + 1;
+      selectedStoreRequestSeqRef.current = requestSeq;
+      setSelectedStore(null);
+      setLabelStore(null);
+      setShowDirectionsSheet(false);
+
+      try {
+        const store = await getStorePreview(storeId);
+        if (selectedStoreRequestSeqRef.current !== requestSeq) return;
+
+        setSelectedStore(store);
+        if (options?.hideList) {
+          setShowList(false);
+        }
+
+        const lat = store.locationDto?.latitude;
+        const lng = store.locationDto?.longitude;
+        if (lat != null && lng != null) {
+          setLabelStore({ name: getStoreName(store), lat, lng });
+
+          if (options?.focusMap) {
+            setMapCenter({ lat, lng });
+            programmaticPanRef.current = true;
+            setFocusLocation({ lat, lng, key: Date.now() });
           }
-        })());
-      if (!store) return;
-      setSelectedStore(store);
-      const lat = store.locationDto?.latitude;
-      const lng = store.locationDto?.longitude;
-      if (lat != null && lng != null) {
-        setLabelStore({ name: getStoreName(store), lat, lng });
-        setMapCenter({ lat, lng });
-        programmaticPanRef.current = true;
-        setFocusLocation({ lat, lng, key: Date.now() });
+        }
+      } catch (error) {
+        if (selectedStoreRequestSeqRef.current !== requestSeq) return;
+        console.error("[MapPage] getStorePreview failed", {
+          source,
+          storeId,
+          error,
+        });
+        openToast("매장 정보를 불러오지 못했어요.", { gap: 30 });
       }
     },
-    [listStores],
+    [openToast],
   );
 
-  const focusStoreOnMap = useCallback((store: StoreItem) => {
-    const lat = store.locationDto?.latitude;
-    const lng = store.locationDto?.longitude;
-    if (lat == null || lng == null) return;
+  const handleMarkerClick = useCallback(
+    (storeId: number | string) => {
+      void selectStorePreview(storeId, "marker", { focusMap: true });
+    },
+    [selectStorePreview],
+  );
 
-    setLabelStore({ name: getStoreName(store), lat, lng });
-    setMapCenter({ lat, lng });
-    setShowList(false);
-    programmaticPanRef.current = true;
-    setFocusLocation({ lat, lng, key: Date.now() });
-  }, []);
+  const handleMarkerGroupClick = useCallback(
+    (storeId: number | string) => {
+      void selectStorePreview(storeId, "marker", { focusMap: true });
+    },
+    [selectStorePreview],
+  );
 
   // 인디케이터 drag
   const onHandleTouchStart = (e: React.TouchEvent) => {
@@ -427,6 +467,79 @@ export default function MapPage() {
     setDragY(0);
   };
 
+  const getSelectedDestination = () => {
+    console.log(selectedStore, "selectedStore");
+    const location = selectedStore?.locationDto;
+    console.log(location);
+    if (!location) return null;
+
+    return {
+      lat: location.latitude,
+      lng: location.longitude,
+      address: location.address,
+    };
+  };
+
+  const openTMap = async () => {
+    const destination = getSelectedDestination();
+    if (!destination) {
+      openToast("매장 주소가 없습니다", { gap: 30 });
+      return;
+    }
+
+    const { lat, lng } = destination;
+
+    try {
+      await openURL(`tmap://route?goalx=${lng}&goaly=${lat}`);
+    } catch {
+      await openURL(STORE_URLS.tmap);
+    }
+  };
+
+  const openNaverMap = async () => {
+    const destination = getSelectedDestination();
+
+    if (!destination) {
+      openToast("매장 주소가 없습니다", { gap: 30 });
+      return;
+    }
+
+    const { lat, lng, address } = destination;
+    try {
+      await openURL(
+        `nmap://place?lat=${lat}&lng=${lng}&name=${encodeURIComponent(address ?? "")}`,
+      );
+    } catch {
+      await openURL(STORE_URLS.naver);
+    }
+  };
+
+  const openKakaoMap = async () => {
+    const destination = getSelectedDestination();
+    if (!destination) {
+      openToast("매장 주소가 없습니다", { gap: 30 });
+      return;
+    }
+
+    const { lat, lng } = destination;
+
+    try {
+      await openURL(`kakaomap://look?p=${lat},${lng}`);
+    } catch {
+      await openURL(STORE_URLS.kakao);
+    }
+  };
+
+  const callSelectedStore = () => {
+    const contact = selectedStore?.contact?.trim();
+    if (!contact) {
+      openToast("매장 전화번호가 없습니다", { gap: 30 });
+      return;
+    }
+
+    window.location.href = `tel:${contact}`;
+  };
+
   const translateY = !showList ? "100%" : `${dragY}px`;
   const transition = dragging.current
     ? "none"
@@ -443,6 +556,7 @@ export default function MapPage() {
         labelStore={labelStore}
         focusLocation={focusLocation}
         onMarkerClick={handleMarkerClick}
+        onMarkerGroupClick={handleMarkerGroupClick}
         onMapMoved={handleMapMoved}
       />
 
@@ -724,8 +838,10 @@ export default function MapPage() {
                   <div key={storeId} data-store-index={index}>
                     <ListRow
                       onClick={() => {
-                        setSelectedStore(store);
-                        focusStoreOnMap(store);
+                        void selectStorePreview(storeId, "list", {
+                          focusMap: true,
+                          hideList: true,
+                        });
                       }}
                       left={
                         store.mainImgUrl ? (
@@ -799,8 +915,10 @@ export default function MapPage() {
       <BottomSheet
         open={selectedStore != null}
         onClose={() => {
+          selectedStoreRequestSeqRef.current += 1;
           setSelectedStore(null);
           setLabelStore(null);
+          setShowDirectionsSheet(false);
         }}
         header={
           <BottomSheet.Header>
@@ -829,8 +947,15 @@ export default function MapPage() {
         }
         cta={
           <BottomSheet.DoubleCTA
-            leftButton={<Button variant="weak">길찾기</Button>}
-            rightButton={<Button>전화하기</Button>}
+            leftButton={
+              <Button
+                variant="weak"
+                onClick={() => setShowDirectionsSheet(true)}
+              >
+                길찾기
+              </Button>
+            }
+            rightButton={<Button onClick={callSelectedStore}>전화하기</Button>}
           />
         }
       >
@@ -871,6 +996,80 @@ export default function MapPage() {
               verticalPadding="large"
             />
           ))}
+      </BottomSheet>
+
+      <BottomSheet
+        header={<BottomSheet.Header>길찾기</BottomSheet.Header>}
+        open={showDirectionsSheet}
+        onClose={() => setShowDirectionsSheet(false)}
+        cta={
+          <BottomSheet.CTA
+            color="primary"
+            variant="fill"
+            disabled={false}
+            onClick={() => setShowDirectionsSheet(false)}
+          >
+            닫기
+          </BottomSheet.CTA>
+        }
+      >
+        <ListRow
+          onClick={() => openTMap()}
+          left={
+            <ListRow.AssetImage
+              size="medium"
+              src={tmapImage}
+              shape="squircle"
+              scaleType="crop"
+            />
+          }
+          contents={
+            <ListRow.Texts
+              type="1RowTypeA"
+              top="T 맵"
+              topProps={{ color: adaptive.grey700 }}
+            />
+          }
+          verticalPadding="large"
+        />
+        <ListRow
+          onClick={() => openNaverMap()}
+          left={
+            <ListRow.AssetImage
+              size="medium"
+              src={navermap}
+              shape="squircle"
+              scaleType="crop"
+            />
+          }
+          contents={
+            <ListRow.Texts
+              type="1RowTypeA"
+              top="네이버 지도"
+              topProps={{ color: adaptive.grey700 }}
+            />
+          }
+          verticalPadding="large"
+        />
+        <ListRow
+          onClick={() => openKakaoMap()}
+          left={
+            <ListRow.AssetImage
+              size="medium"
+              src={kakaomapImage}
+              shape="squircle"
+              scaleType="crop"
+            />
+          }
+          contents={
+            <ListRow.Texts
+              type="1RowTypeA"
+              top="카카오 맵"
+              topProps={{ color: adaptive.grey700 }}
+            />
+          }
+          verticalPadding="large"
+        />
       </BottomSheet>
 
       <BottomSheet

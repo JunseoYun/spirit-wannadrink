@@ -42,13 +42,11 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const { authorizationCode, referrer } = await appLogin();
-      alert(`authorizationCode: ${authorizationCode}\nreferrer: ${referrer}`)
       const tokens = await tossLogin(authorizationCode, referrer);
       authStore.setTokens(tokens.accessToken, tokens.refreshToken);
-      alert(`accessToken: ${tokens.accessToken}\n\nrefreshToken: ${tokens.refreshToken}`)
       navigate("/map");
     } catch (e: any) {
-      alert(`로그인 실패: ${JSON.stringify(e)}`)
+      alert(`로그인 실패: ${JSON.stringify(e)}`);
     } finally {
       setLoading(false);
     }
