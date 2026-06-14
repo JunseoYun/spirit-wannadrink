@@ -1007,7 +1007,7 @@ export default function MapPage() {
             color="primary"
             variant="fill"
             disabled={false}
-            onClick={() => setShowDirectionsSheet(false)}
+            onTap={() => setShowDirectionsSheet(false)}
           >
             닫기
           </BottomSheet.CTA>
