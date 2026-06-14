@@ -468,9 +468,7 @@ export default function MapPage() {
   };
 
   const getSelectedDestination = () => {
-    console.log(selectedStore, "selectedStore");
     const location = selectedStore?.locationDto;
-    console.log(location);
     if (!location) return null;
 
     return {

@@ -7,6 +7,7 @@ import {
   BottomSheet,
   TextButton,
   Top,
+  useToast,
 } from "@toss/tds-mobile";
 import { adaptive } from "@toss/tds-colors";
 import { tossLogin } from "../api/auth";
@@ -37,6 +38,7 @@ const AGREEMENTS = [
 export default function LoginPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const { openToast } = useToast();
 
   const handleLogin = async () => {
     setLoading(true);
@@ -45,8 +47,8 @@ export default function LoginPage() {
       const tokens = await tossLogin(authorizationCode, referrer);
       authStore.setTokens(tokens.accessToken, tokens.refreshToken);
       navigate("/map");
-    } catch (e: any) {
-      alert(`로그인 실패: ${JSON.stringify(e)}`);
+    } catch {
+      openToast("로그인에 실패했어요. 다시 시도해주세요.", { gap: 30 });
     } finally {
       setLoading(false);
     }
