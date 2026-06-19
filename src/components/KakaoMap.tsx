@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { getBusinessStatus } from "../utils/businessHours";
 
 export interface StoreForMap {
@@ -97,6 +97,53 @@ function getLowestPriceLabel(stores: StoreForMap[], selectedDrinkType: string) {
   return lowestPrice != null ? `${lowestPrice.toLocaleString()}\uC6D0` : "-";
 }
 
+function renderMyLocationOverlay(
+  kakao: any,
+  map: any,
+  location: { lat: number; lng: number },
+  overlayRef: MutableRefObject<any>,
+) {
+  const position = new kakao.maps.LatLng(location.lat, location.lng);
+
+  if (overlayRef.current) {
+    overlayRef.current.setMap(null);
+  }
+
+  const dot = document.createElement("div");
+  dot.innerHTML = `
+    <div style="position:relative;width:24px;height:24px;display:flex;align-items:center;justify-content:center;">
+      <div style="position:absolute;width:24px;height:24px;background:rgba(49,130,246,0.25);border-radius:100%;animation:pulse 1.8s ease-out infinite;"></div>
+      <div style="width:14px;height:14px;background:#3182f6;border-radius:100%;box-shadow:0 1px 6px rgba(49,130,246,0.5);flex-shrink:0;"></div>
+    </div>
+    <style>@keyframes pulse{0%{transform:scale(1);opacity:0.7}100%{transform:scale(2.4);opacity:0}}</style>
+  `;
+
+  overlayRef.current = new kakao.maps.CustomOverlay({
+    position,
+    content: dot,
+    map,
+    yAnchor: 0.5,
+    zIndex: 10,
+  });
+}
+
+function panToFocusLocation(
+  kakao: any,
+  map: any,
+  location: { lat: number; lng: number },
+) {
+  const position = new kakao.maps.LatLng(location.lat, location.lng);
+  try {
+    const proj = map.getProjection();
+    const screenPt = proj.containerPointFromCoords(position);
+    const offsetPt = new kakao.maps.Point(screenPt.x, screenPt.y + 130);
+    const offsetLatLng = proj.coordsFromContainerPoint(offsetPt);
+    map.panTo(offsetLatLng);
+  } catch {
+    map.panTo(position);
+  }
+}
+
 export default function KakaoMap({
   lat,
   lng,
@@ -118,12 +165,18 @@ export default function KakaoMap({
   const labelOverlayRef = useRef<any>(null);
 
   // 항상 최신 콜백/데이터를 참조하기 위한 refs
+  const latestCenterRef = useRef({ lat, lng });
   const onMapMovedRef = useRef(onMapMoved);
   const onMarkerClickRef = useRef(onMarkerClick);
   const onMarkerGroupClickRef = useRef(onMarkerGroupClick);
   const storesRef = useRef(stores);
   const selectedDrinkTypeRef = useRef(selectedDrinkType);
   const selectedStoreIdRef = useRef(selectedStoreId);
+  const myLocationRef = useRef(myLocation);
+  const focusLocationRef = useRef(focusLocation);
+  useEffect(() => {
+    latestCenterRef.current = { lat, lng };
+  }, [lat, lng]);
   useEffect(() => {
     onMapMovedRef.current = onMapMoved;
   }, [onMapMoved]);
@@ -142,6 +195,12 @@ export default function KakaoMap({
   useEffect(() => {
     selectedStoreIdRef.current = selectedStoreId;
   }, [selectedStoreId]);
+  useEffect(() => {
+    myLocationRef.current = myLocation;
+  }, [myLocation]);
+  useEffect(() => {
+    focusLocationRef.current = focusLocation;
+  }, [focusLocation]);
 
   const clearMarkers = () => {
     markersRef.current.forEach((m) => m.setMap(null));
@@ -317,9 +376,10 @@ export default function KakaoMap({
     const initMap = () => {
       if (!mapRef.current) return;
       const kakao = window.kakao;
+      const center = latestCenterRef.current;
 
       mapInstance.current = new kakao.maps.Map(mapRef.current, {
-        center: new kakao.maps.LatLng(lat, lng),
+        center: new kakao.maps.LatLng(center.lat, center.lng),
         level: 5,
       });
 
@@ -344,6 +404,17 @@ export default function KakaoMap({
       });
 
       renderMarkers(kakao, mapInstance.current, storesRef.current);
+      if (myLocationRef.current) {
+        renderMyLocationOverlay(
+          kakao,
+          mapInstance.current,
+          myLocationRef.current,
+          myLocationOverlayRef,
+        );
+      }
+      if (focusLocationRef.current) {
+        panToFocusLocation(kakao, mapInstance.current, focusLocationRef.current);
+      }
     };
 
     if (window.kakao?.maps?.Map) {
@@ -386,34 +457,15 @@ export default function KakaoMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stores, selectedDrinkType, selectedStoreId]);
 
-  // 내 위치 변경 시 지도 이동 + 파란 점 마커
+  // 내 위치 변경 시 파란 점 마커만 갱신한다. 지도 이동은 focusLocation으로만 제어한다.
   useEffect(() => {
     if (!mapInstance.current || !window.kakao?.maps || !myLocation) return;
-    const kakao = window.kakao;
-    const position = new kakao.maps.LatLng(myLocation.lat, myLocation.lng);
-
-    if (myLocationOverlayRef.current) {
-      myLocationOverlayRef.current.setMap(null);
-    }
-
-    const dot = document.createElement("div");
-    dot.innerHTML = `
-      <div style="position:relative;width:24px;height:24px;display:flex;align-items:center;justify-content:center;">
-        <div style="position:absolute;width:24px;height:24px;background:rgba(49,130,246,0.25);border-radius:100%;animation:pulse 1.8s ease-out infinite;"></div>
-        <div style="width:14px;height:14px;background:#3182f6;border-radius:100%;box-shadow:0 1px 6px rgba(49,130,246,0.5);flex-shrink:0;"></div>
-      </div>
-      <style>@keyframes pulse{0%{transform:scale(1);opacity:0.7}100%{transform:scale(2.4);opacity:0}}</style>
-    `;
-
-    myLocationOverlayRef.current = new kakao.maps.CustomOverlay({
-      position,
-      content: dot,
-      map: mapInstance.current,
-      yAnchor: 0.5,
-      zIndex: 10,
-    });
-
-    mapInstance.current.panTo(position);
+    renderMyLocationOverlay(
+      window.kakao,
+      mapInstance.current,
+      myLocation,
+      myLocationOverlayRef,
+    );
   }, [myLocation]);
 
   // labelStore 변경 시 가게 이름 말풍선 표시/숨김
@@ -459,20 +511,7 @@ export default function KakaoMap({
   // focusLocation 변경 시 지도 중심 이동 (바텀시트 고려해 130px 위에 배치)
   useEffect(() => {
     if (!mapInstance.current || !window.kakao?.maps || !focusLocation) return;
-    const kakao = window.kakao;
-    const position = new kakao.maps.LatLng(
-      focusLocation.lat,
-      focusLocation.lng,
-    );
-    try {
-      const proj = mapInstance.current.getProjection();
-      const screenPt = proj.containerPointFromCoords(position);
-      const offsetPt = new kakao.maps.Point(screenPt.x, screenPt.y + 130);
-      const offsetLatLng = proj.coordsFromContainerPoint(offsetPt);
-      mapInstance.current.panTo(offsetLatLng);
-    } catch {
-      mapInstance.current.panTo(position);
-    }
+    panToFocusLocation(window.kakao, mapInstance.current, focusLocation);
   }, [focusLocation]);
 
   return <div ref={mapRef} style={{ width: "100%", height: "100%" }} />;

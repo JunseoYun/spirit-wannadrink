@@ -9,6 +9,7 @@ import {
   Skeleton,
   Spacing,
   useToast,
+  Slider,
 } from "@toss/tds-mobile";
 import { adaptive } from "@toss/tds-colors";
 import KakaoMap from "../components/KakaoMap";
@@ -19,7 +20,12 @@ import { getStoreMarkers, getStoreList, getStorePreview } from "../api/store";
 import type { StoreItem } from "../api/store";
 import { getAddressFromCoords } from "../api/location";
 import { getBusinessStatus } from "../utils/businessHours";
-import { openURL } from "@apps-in-toss/web-framework";
+import {
+  Accuracy,
+  getCurrentLocation,
+  openURL,
+  GetCurrentLocationPermissionError,
+} from "@apps-in-toss/web-framework";
 
 const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -94,6 +100,10 @@ function getStoreName(store: StoreItem) {
   return store.name || store.storeName || "";
 }
 
+function getStoreKey(store: StoreItem) {
+  return String(store.storeId ?? store.id ?? "");
+}
+
 function getMainPriceText(store: StoreItem, drinkType?: string) {
   const drink = drinkType
     ? (store.mainDrinkDtos?.find((d) => d.type === drinkType) ??
@@ -156,6 +166,27 @@ function calcDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
 const DEFAULT_LAT = 37.5044;
 const DEFAULT_LNG = 127.027;
 
+async function getCurrentLatLng() {
+  const permission = await getCurrentLocation.getPermission();
+
+  if (permission !== "allowed") {
+    const result = await getCurrentLocation.openPermissionDialog();
+
+    if (result !== "allowed") {
+      throw new GetCurrentLocationPermissionError();
+    }
+  }
+
+  const location = await getCurrentLocation({
+    accuracy: Accuracy.Balanced,
+  });
+
+  return {
+    lat: location.coords.latitude,
+    lng: location.coords.longitude,
+  };
+}
+
 export default function MapPage() {
   const [showList, setShowList] = useState(true);
   const [dragY, setDragY] = useState(0);
@@ -185,20 +216,22 @@ export default function MapPage() {
     key: number;
   } | null>(null);
   const [maxPrice, setMaxPrice] = useState<number | null>(4000);
+  const [tempPrice, setTempPrice] = useState(4000);
   const [showPricePicker, setShowPricePicker] = useState(false);
   const [showDirectionsSheet, setShowDirectionsSheet] = useState(false);
   const programmaticPanRef = useRef(false);
-  const focusFirstOnNextFetchRef = useRef(false);
   const scrollThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentListPageRef = useRef(0);
   const hasMoreStoresRef = useRef(true);
   const loadingMoreStoresRef = useRef(false);
   const listQueryCenterRef = useRef({ lat: DEFAULT_LAT, lng: DEFAULT_LNG });
+  const currentMapCenterRef = useRef({ lat: DEFAULT_LAT, lng: DEFAULT_LNG });
   const selectedStoreRequestSeqRef = useRef(0);
   const { openToast } = useToast();
   const touchStartY = useRef(0);
   const dragging = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const selectedDrinkType = DRINK_TYPES[selectedChip];
 
   const loadMoreStores = useCallback(async () => {
     if (
@@ -236,11 +269,9 @@ export default function MapPage() {
 
       currentListPageRef.current = nextPage;
       setListStores((prev) => {
-        const seenKeys = new Set(
-          prev.map((store) => String(store.storeId ?? store.id ?? "")),
-        );
+        const seenKeys = new Set(prev.map(getStoreKey));
         const storesToAppend = filteredNextList.filter((store) => {
-          const key = String(store.storeId ?? store.id ?? "");
+          const key = getStoreKey(store);
           if (!key || seenKeys.has(key)) return false;
           seenKeys.add(key);
           return true;
@@ -270,7 +301,12 @@ export default function MapPage() {
   }, [listStores, loadMoreStores]);
 
   const fetchStores = useCallback(
-    async (lat: number, lng: number) => {
+    async (
+      lat: number,
+      lng: number,
+      drinkType: string,
+      drinkPrice: number | null,
+    ) => {
       setLoadingStores(true);
       setLoadingMoreStores(false);
       loadingMoreStoresRef.current = false;
@@ -278,25 +314,22 @@ export default function MapPage() {
       hasMoreStoresRef.current = true;
       listQueryCenterRef.current = { lat, lng };
       setShowSearchHere(false);
-      const drinkType = DRINK_TYPES[selectedChip];
       try {
         const [markers, list] = await Promise.all([
-          getStoreMarkers(lat, lng, 2, drinkType, maxPrice),
-          getStoreList(lat, lng, 2, 0, drinkType, maxPrice),
+          getStoreMarkers(lat, lng, 2, drinkType, drinkPrice),
+          getStoreList(lat, lng, 2, 0, drinkType, drinkPrice),
         ]);
         const matchesMaxPrice = (store: StoreItem) => {
-          if (maxPrice == null) return true;
+          if (drinkPrice == null) return true;
           const drink = store.mainDrinkDtos?.find((d) => d.type === drinkType);
-          return drink?.price != null && drink.price <= maxPrice;
+          return drink?.price != null && drink.price <= drinkPrice;
         };
-        const getStoreKey = (store: StoreItem) =>
-          String(store.storeId ?? store.id ?? "");
         const filteredList = list.filter(matchesMaxPrice);
         const allowedKeys = new Set(
           filteredList.map(getStoreKey).filter((k) => k !== ""),
         );
         const filteredMarkers =
-          maxPrice == null
+          drinkPrice == null
             ? markers
             : markers.filter((m) => allowedKeys.has(getStoreKey(m)));
         const listMapByKey = new Map(
@@ -312,30 +345,14 @@ export default function MapPage() {
         setListStores(filteredList);
         hasMoreStoresRef.current = list.length > 0;
         setMarkerStores(mergedMarkers);
-        if (focusFirstOnNextFetchRef.current) {
-          focusFirstOnNextFetchRef.current = false;
-          const firstStore = filteredList[0];
-          const lat = firstStore?.locationDto?.latitude;
-          const lng = firstStore?.locationDto?.longitude;
-          if (lat != null && lng != null) {
-            programmaticPanRef.current = true;
-            setFocusLocation({ lat, lng, key: Date.now() });
-            setLabelStore(null);
-          }
-        }
       } catch {
         // 조회 실패 시 기존 상태를 유지한다.
       } finally {
         setLoadingStores(false);
       }
     },
-    [selectedChip, maxPrice],
+    [],
   );
-
-  // 칩(drinkType) 또는 maxPrice 변경 시 현재 위치로 재조회
-  useEffect(() => {
-    fetchStores(mapCenter.lat, mapCenter.lng);
-  }, [selectedChip, maxPrice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updatePriceFromCoords = useCallback(
     async (lat: number, lng: number) => {
@@ -345,29 +362,60 @@ export default function MapPage() {
     [],
   );
 
-  // 최초 마운트: GPS 시도 후 fetchStores
   useEffect(() => {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        setMyLocation(loc);
-        setMapCenter(loc);
-        updatePriceFromCoords(loc.lat, loc.lng);
-        fetchStores(loc.lat, loc.lng);
-      },
-      () => {
-        fetchStores(DEFAULT_LAT, DEFAULT_LNG);
-      },
-    );
-  }, [fetchStores, updatePriceFromCoords]);
+    const center = currentMapCenterRef.current;
+    fetchStores(center.lat, center.lng, selectedDrinkType, maxPrice);
+  }, [selectedChip, maxPrice]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 지도 이동 시 검색 버튼만 표시 + 목록 숨김 (programmatic pan은 제외)
+  useEffect(() => {
+    let isActive = true;
+
+    void (async () => {
+      try {
+        const loc = await getCurrentLatLng();
+        if (!isActive) return;
+        setMyLocation(loc);
+      } catch {
+        // 위치 권한이 없거나 실패해도 초기 지도/검색 중심은 기본 좌표를 유지한다.
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  // 실제 지도 중심은 항상 저장하고, 검색 UI 반응만 programmatic pan에서 제외한다.
+  const moveToCurrentLocation = useCallback(async () => {
+    try {
+      const loc = await getCurrentLatLng();
+      setMyLocation(loc);
+      currentMapCenterRef.current = loc;
+      setMapCenter(loc);
+      programmaticPanRef.current = true;
+      setFocusLocation({ ...loc, key: Date.now() });
+      updatePriceFromCoords(loc.lat, loc.lng);
+      fetchStores(loc.lat, loc.lng, selectedDrinkType, maxPrice);
+    } catch {
+      openToast("위치 권한을 허용해주세요.", { gap: 30 });
+    }
+  }, [
+    fetchStores,
+    maxPrice,
+    openToast,
+    selectedDrinkType,
+    updatePriceFromCoords,
+  ]);
+
   const handleMapMoved = useCallback((lat: number, lng: number) => {
+    const center = { lat, lng };
+    currentMapCenterRef.current = center;
+
     if (programmaticPanRef.current) {
       programmaticPanRef.current = false;
       return;
     }
-    setMapCenter({ lat, lng });
+    setMapCenter(center);
     setShowSearchHere(true);
     setShowList(false);
   }, []);
@@ -401,9 +449,11 @@ export default function MapPage() {
           setLabelStore({ name: getStoreName(store), lat, lng });
 
           if (options?.focusMap) {
-            setMapCenter({ lat, lng });
+            const center = { lat, lng };
+            currentMapCenterRef.current = center;
+            setMapCenter(center);
             programmaticPanRef.current = true;
-            setFocusLocation({ lat, lng, key: Date.now() });
+            setFocusLocation({ ...center, key: Date.now() });
           }
         }
       } catch (error) {
@@ -487,6 +537,7 @@ export default function MapPage() {
 
     const { lat, lng } = destination;
 
+    setShowDirectionsSheet(false);
     try {
       await openURL(`tmap://route?goalx=${lng}&goaly=${lat}`);
     } catch {
@@ -503,6 +554,7 @@ export default function MapPage() {
     }
 
     const { lat, lng, address } = destination;
+    setShowDirectionsSheet(false);
     try {
       await openURL(
         `nmap://place?lat=${lat}&lng=${lng}&name=${encodeURIComponent(address ?? "")}`,
@@ -521,6 +573,7 @@ export default function MapPage() {
 
     const { lat, lng } = destination;
 
+    setShowDirectionsSheet(false);
     try {
       await openURL(`kakaomap://look?p=${lat},${lng}`);
     } catch {
@@ -548,7 +601,7 @@ export default function MapPage() {
         lat={mapCenter.lat}
         lng={mapCenter.lng}
         stores={markerStores}
-        selectedDrinkType={DRINK_TYPES[selectedChip]}
+        selectedDrinkType={selectedDrinkType}
         selectedStoreId={selectedStore?.storeId ?? selectedStore?.id ?? null}
         myLocation={myLocation}
         labelStore={labelStore}
@@ -575,9 +628,11 @@ export default function MapPage() {
         {showSearchHere && (
           <button
             onClick={() => {
+              const center = currentMapCenterRef.current;
               setShowSearchHere(false);
-              updatePriceFromCoords(mapCenter.lat, mapCenter.lng);
-              fetchStores(mapCenter.lat, mapCenter.lng);
+              setMapCenter(center);
+              updatePriceFromCoords(center.lat, center.lng);
+              fetchStores(center.lat, center.lng, selectedDrinkType, maxPrice);
             }}
             style={{
               height: 36,
@@ -671,20 +726,7 @@ export default function MapPage() {
           }}
         >
           <button
-            onClick={() =>
-              navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                  const loc = {
-                    lat: pos.coords.latitude,
-                    lng: pos.coords.longitude,
-                  };
-                  setMyLocation(loc);
-                  updatePriceFromCoords(loc.lat, loc.lng);
-                  fetchStores(loc.lat, loc.lng);
-                },
-                () => openToast("위치 권한을 허용해주세요.", { gap: 30 }),
-              )
-            }
+            onClick={moveToCurrentLocation}
             style={{
               width: 36,
               height: 36,
@@ -772,11 +814,7 @@ export default function MapPage() {
               {CHIP_ITEMS.map((label, i) => (
                 <button
                   key={label}
-                  onClick={() => {
-                    if (selectedChip !== i)
-                      focusFirstOnNextFetchRef.current = true;
-                    setSelectedChip(i);
-                  }}
+                  onClick={() => setSelectedChip(i)}
                   style={{
                     padding: "0 6px",
                     margin: "0 6px",
@@ -828,8 +866,7 @@ export default function MapPage() {
               listStores.map((store, index) => {
                 const storeId = store.storeId ?? store.id ?? "";
                 const name = getStoreName(store);
-                const drinkType = DRINK_TYPES[selectedChip];
-                const price = getMainPriceText(store, drinkType);
+                const price = getMainPriceText(store, selectedDrinkType);
                 const category = getCategoryText(store);
                 const { status } = getStoreStatus(store);
                 return (
@@ -881,7 +918,7 @@ export default function MapPage() {
                       right={
                         <Badge
                           size="medium"
-                          color={getDrinkBadgeColor(drinkType)}
+                          color={getDrinkBadgeColor(selectedDrinkType)}
                           variant="weak"
                         >
                           {price}
@@ -1004,8 +1041,13 @@ export default function MapPage() {
           <BottomSheet.CTA
             color="primary"
             variant="fill"
-            disabled={false}
-            onTap={() => setShowDirectionsSheet(false)}
+            onTap={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setTimeout(() => {
+                setShowDirectionsSheet(false);
+              }, 50);
+            }}
           >
             닫기
           </BottomSheet.CTA>
@@ -1078,50 +1120,51 @@ export default function MapPage() {
             {CHIP_ITEMS[selectedChip]} 최대 가격 설정
           </BottomSheet.Header>
         }
+        cta={
+          <BottomSheet.CTA
+            onTap={() => {
+              setMaxPrice(tempPrice);
+              setShowPricePicker(false);
+            }}
+          >
+            적용하기
+          </BottomSheet.CTA>
+        }
       >
         <div
           style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 8,
-            padding: "8px 16px 24px",
+            paddingLeft: "24px",
+            paddingRight: "24px",
           }}
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
         >
-          {[3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000].map((price) => (
-            <button
-              key={price}
-              onClick={() => {
-                setMaxPrice((prev) => (prev === price ? null : price));
-                setShowPricePicker(false);
-              }}
-              style={{
-                height: 40,
-                padding: "0 16px",
-                borderRadius: 100,
-                border:
-                  maxPrice === price
-                    ? "none"
-                    : `1.5px solid ${adaptive.grey200}`,
-                background:
-                  maxPrice === price
-                    ? selectedChip === 0
-                      ? "#D5EFE7"
-                      : "#FFF2DD"
-                    : "#fff",
-                color:
-                  maxPrice === price
-                    ? selectedChip === 0
-                      ? "#18895D"
-                      : "#DA7C03"
-                    : adaptive.grey700,
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              ~{price.toLocaleString()}원
-            </button>
-          ))}
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: 20,
+              fontWeight: 700,
+              color: "#3182F6",
+              marginBottom: 12,
+            }}
+          >
+            {tempPrice.toLocaleString()}원
+          </div>
+
+          <Slider
+            value={tempPrice}
+            minValue={3000}
+            maxValue={10000}
+            color="#3182F6"
+            label={{
+              min: "3,000원",
+              max: "10,000원",
+            }}
+            onValueChange={(value) => {
+              setTempPrice(Math.round(value / 1000) * 1000);
+            }}
+          />
         </div>
       </BottomSheet>
     </div>
