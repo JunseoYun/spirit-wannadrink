@@ -1,4 +1,9 @@
 {
   "appName": "spirit-wannadrink",
-  "permissions": []
+  "permissions": [
+    {
+      "name": "geolocation",
+      "access": "access"
+    }
+  ]
 }

@@ -357,7 +357,7 @@ export default function MapPage() {
   const updatePriceFromCoords = useCallback(
     async (lat: number, lng: number) => {
       const address = await getAddressFromCoords(lat, lng);
-      setMaxPrice(address?.includes("서울") ? 5000 : 4000);
+      setMaxPrice(address?.includes("서울") ? 4000 : 4000);
     },
     [],
   );
